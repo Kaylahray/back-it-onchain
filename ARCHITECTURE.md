@@ -51,16 +51,17 @@ Stack (final):
 
 ```mermaid
 flowchart TD
-    User((User)) --> Frontend[Next.js Frontend]
+    User(User) --> Frontend[Next.js Frontend]
     Frontend --> Wallet[OnchainKit Embedded Wallet + Passkeys]
-    Wallet --> AA[Smart Account (ERC-4337)]
+    Wallet --> AA[Smart Account ERC4337]
     AA --> Contracts[Base L2 Smart Contracts]
     Contracts --> OracleTrigger[Emit PriceRequest Event]
     OracleTrigger --> Backend[NestJS Oracle Service]
     Backend --> PriceSign[EIP-712 Signed Price Data]
     PriceSign --> Contracts
-    Contracts --> Result[Validate Prediction + Settle Stakes]
+    Contracts --> Result[Validate Prediction and Settle Stakes]
     Result --> Frontend
+
 ```
 
 ## 2.2 Sequence: Create → Resolve → Payout
