@@ -1,6 +1,9 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useWriteContract, usePublicClient } from 'wagmi';
+import { parseEther, stringToHex } from 'viem';
+import { CallRegistryABI, ERC20ABI } from '../lib/abis';
 
 export interface Call {
     id: string;
@@ -93,46 +96,113 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
     const [isLoading, setIsLoading] = useState(false);
     const currentUser = MOCK_USER;
 
+    const { writeContractAsync } = useWriteContract();
+    const publicClient = usePublicClient();
+
     const createCall = async (newCallData: Omit<Call, 'id' | 'creator' | 'status' | 'createdAt' | 'backers' | 'comments' | 'volume'>) => {
         setIsLoading(true);
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        try {
+            const stakeAmount = parseEther(newCallData.stake.split(' ')[0]); // Assuming "100 USDC" format
+            const tokenAddress = process.env.NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
+            const registryAddress = process.env.NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
 
-        const newCall: Call = {
-            ...newCallData,
-            id: Math.random().toString(36).substr(2, 9),
-            creator: currentUser,
-            status: 'active',
-            createdAt: 'Just now',
-            backers: 0,
-            comments: 0,
-            volume: `$${newCallData.stake}` // Initial volume is just the stake
-        };
+            // 1. Approve Token
+            console.log("Approving token...");
+            const approveTx = await writeContractAsync({
+                address: tokenAddress,
+                abi: ERC20ABI,
+                functionName: 'approve',
+                args: [registryAddress, stakeAmount],
+            });
+            console.log("Approve Tx:", approveTx);
+            // Wait for approval receipt
+            await publicClient?.waitForTransactionReceipt({ hash: approveTx });
 
-        setCalls(prev => [newCall, ...prev]);
-        setIsLoading(false);
+            // 2. Create Call
+            console.log("Creating call...");
+            const deadlineTimestamp = Math.floor(new Date(newCallData.deadline).getTime() / 1000);
+            const createTx = await writeContractAsync({
+                address: registryAddress,
+                abi: CallRegistryABI,
+                functionName: 'createCall',
+                args: [
+                    tokenAddress, // _stakeToken
+                    stakeAmount,  // _stakeAmount
+                    BigInt(deadlineTimestamp), // _endTs
+                    tokenAddress, // _tokenAddress (Asset being predicted - using same token for now)
+                    stringToHex(newCallData.asset, { size: 32 }), // _pairId (Mocking with asset name)
+                    "QmMockCID" // _ipfsCID (Mocking IPFS)
+                ],
+            });
+            console.log("Create Call Tx:", createTx);
+            await publicClient?.waitForTransactionReceipt({ hash: createTx });
+
+            // Optimistic Update (or fetch from backend later)
+            const newCall: Call = {
+                ...newCallData,
+                id: Math.random().toString(36).substr(2, 9),
+                creator: currentUser,
+                status: 'active',
+                createdAt: 'Just now',
+                backers: 0,
+                comments: 0,
+                volume: `$${newCallData.stake}`
+            };
+            setCalls(prev => [newCall, ...prev]);
+
+        } catch (error) {
+            console.error("Failed to create call:", error);
+            alert("Failed to create call. See console for details.");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const stakeOnCall = async (callId: string, amount: number, type: 'back' | 'challenge') => {
         setIsLoading(true);
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        try {
+            const stakeAmount = parseEther(amount.toString());
+            const tokenAddress = process.env.NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
+            const registryAddress = process.env.NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
 
-        setCalls(prev => prev.map(call => {
-            if (call.id === callId) {
-                // Simple parsing of volume string (e.g., "$12,450" -> 12450)
-                const currentVolume = parseFloat(call.volume.replace(/[^0-9.-]+/g, "")) || 0;
-                const newVolume = currentVolume + amount;
+            // 1. Approve Token
+            const approveTx = await writeContractAsync({
+                address: tokenAddress,
+                abi: ERC20ABI,
+                functionName: 'approve',
+                args: [registryAddress, stakeAmount],
+            });
+            await publicClient?.waitForTransactionReceipt({ hash: approveTx });
 
-                return {
-                    ...call,
-                    backers: call.backers + 1,
-                    volume: `$${newVolume.toLocaleString()}`
-                };
-            }
-            return call;
-        }));
-        setIsLoading(false);
+            // 2. Stake
+            const position = type === 'back'; // true for YES (Back), false for NO (Challenge)
+            const stakeTx = await writeContractAsync({
+                address: registryAddress,
+                abi: CallRegistryABI,
+                functionName: 'stakeOnCall',
+                args: [BigInt(callId), stakeAmount, position],
+            });
+            await publicClient?.waitForTransactionReceipt({ hash: stakeTx });
+
+            setCalls(prev => prev.map(call => {
+                if (call.id === callId) {
+                    const currentVolume = parseFloat(call.volume.replace(/[^0-9.-]+/g, "")) || 0;
+                    const newVolume = currentVolume + amount;
+                    return {
+                        ...call,
+                        backers: call.backers + 1,
+                        volume: `$${newVolume.toLocaleString()}`
+                    };
+                }
+                return call;
+            }));
+
+        } catch (error) {
+            console.error("Failed to stake:", error);
+            alert("Failed to stake. See console for details.");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
