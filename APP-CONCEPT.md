@@ -24,6 +24,8 @@ Core Principles
 
 💬 Social, Not Speculative: Built like a forum — communities discuss and challenge calls in real time.
 
-⚡ Powered by Stellar: Fast, low-fee, open blockchain ensures real-world usability and inclusivity.
+⚡ Powered by Base: Fast, low-fee, Ethereum L2 ensures real-world usability and inclusivity.
 
 📊 Reputation Through Accuracy: Your history becomes your proof — a public score of insight, not just opinion.
+
+🤝 Social Graph: Follow top predictors, curate your feed, and build your own audience of backers.
