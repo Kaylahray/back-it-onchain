@@ -68,10 +68,10 @@ export default function CallDetailPage() {
                 <div className="mb-6">
                     <div className="flex items-center gap-2 mb-4">
                         <div className={`h-10 w-10 rounded-full ${call.creator.avatar || 'bg-primary'} flex items-center justify-center font-bold text-white text-sm`}>
-                            {(call.creator.name || 'Anonymous').substring(0, 2).toUpperCase()}
+                            {(call.creator.displayName || call.creator.wallet.slice(0, 6)).substring(0, 2).toUpperCase()}
                         </div>
                         <div>
-                            <div className="font-bold">{call.creator.name || 'Anonymous'}</div>
+                            <div className="font-bold">{call.creator.displayName || call.creator.wallet.slice(0, 6)}</div>
                             <div className="text-xs text-muted-foreground">{call.creator.handle || '@anonymous'} • {call.createdAt}</div>
                         </div>
                     </div>

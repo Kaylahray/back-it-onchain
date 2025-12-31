@@ -6,7 +6,7 @@ import { parseEther, stringToHex } from 'viem';
 import { CallRegistryABI, ERC20ABI } from '../lib/abis';
 
 export interface Call {
-    id: string;
+    id: string; // callOnchainId
     title: string;
     thesis: string;
     asset: string;
@@ -14,19 +14,25 @@ export interface Call {
     deadline: string;
     stake: string;
     creator: User;
-    status: 'active' | 'closed' | 'disputed';
+    status: string;
     createdAt: string;
     backers: number;
     comments: number;
     volume: string;
+    totalStakeYes: number;
+    totalStakeNo: number;
+    stakeToken: string;
+    endTs: string;
+    conditionJson?: any;
 }
 
 export interface User {
     wallet: string;
-    name?: string;
+    displayName?: string;
     handle?: string;
     bio?: string;
-    avatar?: string;
+    avatarCid?: string;
+    avatar?: string; // Legacy UI
 }
 
 interface GlobalStateContextType {
@@ -41,63 +47,50 @@ interface GlobalStateContextType {
 
 const GlobalStateContext = createContext<GlobalStateContextType | undefined>(undefined);
 
-const INITIAL_CALLS: Call[] = [
-    // ... (keep initial calls as is, but update creator type if needed, or just cast for now)
-    {
-        id: "1",
-        title: "ETH to hit $4,000 by end of Q2",
-        thesis: "The ETF inflows are just starting to ramp up. Technicals showing a clear breakout from the accumulation zone. Supply shock incoming.",
-        asset: "ETH",
-        target: "$4,000",
-        deadline: "Jun 30, 2025",
-        stake: "5.0 ETH",
-        creator: { wallet: "0x1", name: "CryptoWhale", handle: "@whale_eth", avatar: "bg-blue-500" },
-        status: "active",
-        createdAt: "2h ago",
-        backers: 24,
-        comments: 48,
-        volume: "$12,450"
-    },
-    {
-        id: "2",
-        title: "Base to flip Arbitrum in TVL",
-        thesis: "Coinbase Smart Wallet is a game changer. Onboarding millions of users directly to Base. The flippening is inevitable.",
-        asset: "TVL",
-        target: "Flippening",
-        deadline: "Dec 31, 2025",
-        stake: "1000 USDC",
-        creator: { wallet: "0x2", name: "BaseGod", handle: "@based", avatar: "bg-blue-600" },
-        status: "active",
-        createdAt: "5h ago",
-        backers: 156,
-        comments: 89,
-        volume: "$45,200"
-    },
-    {
-        id: "3",
-        title: "Farcaster to reach 1M DAU",
-        thesis: "Network effects are kicking in. Frames are the new mini-apps. It's the only crypto social app that feels like a real product.",
-        asset: "DAU",
-        target: "1,000,000",
-        deadline: "Aug 15, 2025",
-        stake: "500 USDC",
-        creator: { wallet: "0x3", name: "VitalikFan", handle: "@vitalik_fan", avatar: "bg-green-500" },
-        status: "active",
-        createdAt: "1d ago",
-        backers: 42,
-        comments: 12,
-        volume: "$8,500"
-    }
-];
+const INITIAL_CALLS: Call[] = [];
 
 export function GlobalStateProvider({ children }: { children: React.ReactNode }) {
-    const [calls, setCalls] = useState<Call[]>(INITIAL_CALLS);
+    const [calls, setCalls] = useState<Call[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
 
     const { writeContractAsync } = useWriteContract();
     const publicClient = usePublicClient();
     const { address, isConnected } = useAccount();
+
+    const fetchCalls = async () => {
+        try {
+            const res = await fetch('http://localhost:3001/calls');
+            if (!res.ok) throw new Error('Failed to fetch calls');
+            const data = await res.json();
+
+            // Map backend calls to frontend format
+            const mappedCalls: Call[] = data.map((c: any) => ({
+                id: c.callOnchainId || c.id.toString(),
+                title: c.conditionJson?.title || "Call #" + (c.callOnchainId || c.id),
+                thesis: c.conditionJson?.thesis || "Thesis for " + (c.pairId || "this call"),
+                asset: c.pairId ? Buffer.from(c.pairId.replace('0x', ''), 'hex').toString().replace(/\0/g, '') : "Unknown",
+                target: c.conditionJson?.target || "TBD",
+                deadline: new Date(c.endTs).toLocaleDateString(),
+                stake: `${c.totalStakeYes} ${c.stakeToken}`,
+                creator: c.creator || { wallet: c.creatorWallet, handle: c.creatorWallet.slice(0, 6) },
+                status: c.status || 'active',
+                createdAt: c.createdAt,
+                backers: 0,
+                comments: 0,
+                volume: `$${(Number(c.totalStakeYes || 0) + Number(c.totalStakeNo || 0)).toLocaleString()}`,
+                totalStakeYes: Number(c.totalStakeYes || 0),
+                totalStakeNo: Number(c.totalStakeNo || 0),
+                stakeToken: c.stakeToken || 'USDC',
+                endTs: c.endTs,
+                conditionJson: c.conditionJson
+            }));
+
+            setCalls(mappedCalls);
+        } catch (error) {
+            console.error("Failed to fetch calls:", error);
+        }
+    };
 
     const login = async () => {
         if (!address) return;
@@ -136,6 +129,10 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
             setIsLoading(false);
         }
     };
+
+    useEffect(() => {
+        fetchCalls();
+    }, []);
 
     useEffect(() => {
         if (isConnected && address) {
@@ -185,18 +182,30 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
             console.log("Create Call Tx:", createTx);
             await publicClient?.waitForTransactionReceipt({ hash: createTx });
 
-            // Optimistic Update (or fetch from backend later)
+            // Optimistic Update
             const newCall: Call = {
-                ...newCallData,
-                id: Math.random().toString(36).substr(2, 9),
+                id: 'optimistic-' + Math.random().toString(36).substr(2, 9),
+                title: newCallData.title,
+                thesis: newCallData.thesis,
+                asset: newCallData.asset,
+                target: newCallData.target,
+                deadline: newCallData.deadline,
+                stake: newCallData.stake,
                 creator: currentUser,
                 status: 'active',
-                createdAt: 'Just now',
-                backers: 0,
+                createdAt: new Date().toISOString(),
+                backers: 1,
                 comments: 0,
-                volume: `$${newCallData.stake}`
+                volume: `$${newCallData.stake}`,
+                totalStakeYes: parseFloat(newCallData.stake.split(' ')[0]) || 0,
+                totalStakeNo: 0,
+                stakeToken: process.env.NEXT_PUBLIC_MOCK_TOKEN_ADDRESS || 'USDC',
+                endTs: new Date(newCallData.deadline).toISOString()
             };
             setCalls(prev => [newCall, ...prev]);
+
+            // Refresh calls from backend after some delay for indexer
+            setTimeout(fetchCalls, 8000); // Increased to 8s for local anvil indexing + backend processing
 
         } catch (error) {
             console.error("Failed to create call:", error);

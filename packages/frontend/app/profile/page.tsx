@@ -39,7 +39,7 @@ export default function ProfilePage() {
         );
     }
 
-    const myCalls = calls.filter(call => call.creator?.wallet === currentUser.wallet);
+    const myCalls = calls.filter(call => call.creator?.wallet.toLowerCase() === currentUser.wallet.toLowerCase());
 
     const RightSidebar = (
         <div className="space-y-6">
@@ -74,7 +74,7 @@ export default function ProfilePage() {
                     </div>
 
                     <div className="mb-6">
-                        <h1 className="text-2xl font-bold">{currentUser.name}</h1>
+                        <h1 className="text-2xl font-bold">{currentUser.displayName || currentUser.wallet.slice(0, 6)}</h1>
                         <p className="text-muted-foreground">{currentUser.handle}</p>
 
                         <p className="mt-3 text-sm leading-relaxed">
