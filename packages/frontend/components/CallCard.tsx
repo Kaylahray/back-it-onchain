@@ -15,7 +15,7 @@ export function CallCard({ call }: CallCardProps) {
                             {(call.creator?.displayName || "U").substring(0, 2).toUpperCase()}
                         </div>
                         <div>
-                            <div className="font-bold text-sm group-hover:text-primary transition-colors">{call.creator?.displayName || "Unknown User"}</div>
+                            <div className="font-bold text-sm group-hover:text-primary transition-colors">{call.creator?.displayName || call.creator?.wallet?.slice(0, 6) || "Unknown User"}</div>
                             <div className="text-xs text-muted-foreground">{new Date(call.createdAt).toLocaleDateString()}</div>
                         </div>
                     </div>

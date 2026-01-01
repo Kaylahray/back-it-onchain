@@ -78,6 +78,15 @@ export class IndexerService implements OnModuleInit {
     console.log(`Processing CallCreated: ${callId} by ${creator}`);
     await this.authService.validateUser(creator);
 
+    let conditionJson = {};
+    if (ipfsCID && ipfsCID.length > 0) {
+      try {
+        conditionJson = await this.fetchIpfsData(ipfsCID);
+      } catch (e) {
+        console.error(`Failed to fetch IPFS data for ${ipfsCID}:`, e);
+      }
+    }
+
     const call = this.callsRepository.create({
       callOnchainId: callId.toString(),
       creatorWallet: creator,
@@ -89,11 +98,40 @@ export class IndexerService implements OnModuleInit {
       tokenAddress,
       pairId,
       ipfsCid: ipfsCID,
-      conditionJson: {},
+      conditionJson,
       status: 'active'
     });
 
     await this.callsRepository.save(call);
+  }
+
+  async fetchIpfsData(cid: string): Promise<any> {
+    if (cid === 'QmMockCID') {
+      return {
+        title: 'ETH will flip BTC',
+        thesis: 'Ethereum has better fundamentals and yielding properties than Bitcoin.',
+        target: '0.06 BTC',
+        deadline: '2026-01-01'
+      };
+    }
+
+    const gateways = [
+      `https://gateway.pinata.cloud/ipfs/${cid}`,
+      `https://ipfs.io/ipfs/${cid}`,
+      `https://dweb.link/ipfs/${cid}`
+    ];
+
+    for (const url of gateways) {
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    return {};
   }
 
   async handleStakeAdded(callId: any, staker: any, position: any, amount: any) {
