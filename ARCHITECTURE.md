@@ -1,16 +1,29 @@
-# BackIT (Onchain) - (Base-Aligned, Foundry + OnchainKit)
+# BackIT (Onchain) - Multi-Chain Architecture (Base + Stellar)
 
 **Complete system design & architecture (fool-proof, opinionated, ready-to-ship)**  
-Stack (final):
+
+## Stack Overview
+
+### Base (EVM) Stack
 - **Frontend:** Next.js (App Router) + **OnchainKit** (provider + UI)  
 - **Wallet / Auth:** ERC-4337 Smart Accounts (AA), Passkeys / Embedded wallets, OnchainKit provider (no SIWE)  
-- **Backend:** NestJS (Oracle worker, relayer, indexer)  
-- **DB:** PostgreSQL + Redis + BullMQ  
-- **Chain:** Base (EVM) — use Base RPC (Alchemy/Ankr) + Base Data API for indexed reads  
-- **Contracts:** Solidity, develop with **Foundry** (forge, cast, anvil). Keep Hardhat for verification scripts if desired.  
-- **Price sources:** DexScreener (primary) + GeckoTerminal (fallback)  
-- **Oracle model:** Off-chain EIP-712 signer (scalable; migrate to multisig later)  
+- **Contracts:** Solidity, develop with **Foundry** (forge, cast, anvil)  
+- **Oracle model:** Off-chain EIP-712 signer (secp256k1)  
 - **Gas sponsorship:** Base Paymaster (ERC-4337) for mainnet onboarding
+
+### Stellar (Soroban) Stack
+- **Frontend:** Next.js (App Router) + **@stellar/freighter-api** (wallet)  
+- **Wallet / Auth:** Freighter, Lobstr, Albedo (native Stellar wallets)  
+- **Contracts:** Rust, develop with **Soroban SDK** (soroban-cli)  
+- **Oracle model:** Off-chain ed25519 signer  
+- **Fees:** Stellar resource fees (very low)
+
+### Shared Infrastructure
+- **Backend:** NestJS (Oracle worker, relayer, multi-chain indexer)  
+- **DB:** PostgreSQL + Redis + BullMQ  
+- **Price sources:** DexScreener (primary) + GeckoTerminal (fallback)  
+- **Storage:** IPFS for call metadata
+
 
 ---
 
@@ -19,17 +32,19 @@ Stack (final):
 1. Goals & invariants  
 2. High-level architecture diagrams  
 3. Component responsibilities (detailed)  
-4. On-chain design (contracts, events, interfaces)  
-5. Oracle & outcome verification (EIP-712 flow — exact schema)  
-6. Off-chain backend (NestJS) — services, DB, worker & relayer behavior  
-7. Frontend (Next.js + OnchainKit) — flows, AA, passkeys, UX details  
-8. Indexing, Base RPC, Base Data API & realtime  
-9. Storage & content immutability (IPFS)  
-10. Security, reliability & audit checklist  
-11. Failure modes & mitigations  
-12. Deployments, dev tools & CI/CD (Foundry + Hardhat + Base)  
-13. MVP roadmap & timelines  
-14. Appendices: DB schema, API list, EIP-712 schema, contract snippets, sequence diagrams
+4. On-chain design — Base (Solidity contracts, events, interfaces)  
+5. On-chain design — Stellar (Soroban contracts, events, interfaces)  
+6. Oracle & outcome verification (multi-chain: EIP-712 + ed25519)  
+7. Off-chain backend (NestJS) — services, DB, multi-chain indexer & relayer  
+8. Frontend — Multi-chain wallet integration (OnchainKit + Freighter)  
+9. Indexing — Base (ethers.js) + Stellar (Horizon/SorobanRPC)  
+10. Storage & content immutability (IPFS)  
+11. Security, reliability & audit checklist  
+12. Failure modes & mitigations  
+13. Deployments, dev tools & CI/CD (Foundry + Soroban)  
+14. MVP roadmap & timelines  
+15. Appendices: DB schema, API list, contract snippets, sequence diagrams
+
 
 ---
 
@@ -129,7 +144,7 @@ sequenceDiagram
 
 ---
 
-# 4 — On-chain design (contracts, events, interfaces)
+# 4 — On-chain design — Base (Solidity contracts, events, interfaces)
 
 ## 4.1 Contracts & responsibilities
 - **CallRegistry** (factory/registry):
@@ -183,14 +198,270 @@ struct Call {
 
 ---
 
-# 5 — Oracle & outcome verification (EIP-712 flow)
+# 5 — On-chain design — Stellar (Soroban contracts, events, interfaces)
 
-## 5.1 Why EIP-712 & Off-chain signer?
+Stellar uses **Soroban**, a Rust-based smart contract platform. The contracts mirror the Base functionality but use Stellar-native patterns.
+
+## 5.1 Contracts & responsibilities
+
+- **call_registry** (factory/registry):
+  - `create_call(...)` — registers call metadata + escrow stake
+  - `stake_on_call(call_id, amount, position)` — other participants can join
+  - emits `CallCreated` event via `env.events().publish()`
+
+- **outcome_manager**:
+  - `submit_outcome(call_id, outcome, final_price, timestamp, signature)`
+  - verifies ed25519 signature via `env.crypto().ed25519_verify()`
+  - marks `settled` and emits `OutcomeSubmitted`
+  - payout via `withdraw_payout(call_id)`
+
+## 5.2 Soroban Contract Structure
+
+```rust
+// packages/contracts-stellar/call_registry/src/lib.rs
+#![no_std]
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short,
+    Address, BytesN, Env, Map, String, Symbol, Vec,
+    token::Client as TokenClient,
+};
+
+#[contracttype]
+pub struct Call {
+    pub creator: Address,
+    pub stake_token: Address,
+    pub total_stake_yes: i128,
+    pub total_stake_no: i128,
+    pub start_ts: u64,
+    pub end_ts: u64,
+    pub token_address: Address,
+    pub pair_id: BytesN<32>,
+    pub ipfs_cid: String,
+    pub settled: bool,
+    pub outcome: bool,
+    pub final_price: i128,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Call(u64),
+    NextCallId,
+    UserStake(u64, Address, bool), // (call_id, user, position)
+}
+
+#[contract]
+pub struct CallRegistry;
+
+#[contractimpl]
+impl CallRegistry {
+    pub fn create_call(
+        env: Env,
+        creator: Address,
+        stake_token: Address,
+        stake_amount: i128,
+        end_ts: u64,
+        token_address: Address,
+        pair_id: BytesN<32>,
+        ipfs_cid: String,
+    ) -> u64 {
+        creator.require_auth();
+        
+        // Transfer stake to contract
+        let token = TokenClient::new(&env, &stake_token);
+        token.transfer(&creator, &env.current_contract_address(), &stake_amount);
+        
+        // Get next call ID
+        let call_id: u64 = env.storage().instance()
+            .get(&DataKey::NextCallId)
+            .unwrap_or(0);
+        
+        // Create call
+        let call = Call {
+            creator: creator.clone(),
+            stake_token,
+            total_stake_yes: stake_amount,
+            total_stake_no: 0,
+            start_ts: env.ledger().timestamp(),
+            end_ts,
+            token_address,
+            pair_id,
+            ipfs_cid,
+            settled: false,
+            outcome: false,
+            final_price: 0,
+        };
+        
+        env.storage().persistent().set(&DataKey::Call(call_id), &call);
+        env.storage().instance().set(&DataKey::NextCallId, &(call_id + 1));
+        
+        // Store user stake
+        env.storage().persistent().set(
+            &DataKey::UserStake(call_id, creator.clone(), true),
+            &stake_amount
+        );
+        
+        // Emit event
+        env.events().publish(
+            (symbol_short!("CallCrtd"), call_id),
+            (creator, stake_amount, end_ts)
+        );
+        
+        call_id
+    }
+    
+    pub fn stake_on_call(
+        env: Env,
+        staker: Address,
+        call_id: u64,
+        amount: i128,
+        position: bool, // true = YES, false = NO
+    ) {
+        staker.require_auth();
+        
+        let mut call: Call = env.storage().persistent()
+            .get(&DataKey::Call(call_id))
+            .expect("Call not found");
+        
+        assert!(env.ledger().timestamp() < call.end_ts, "Call ended");
+        assert!(!call.settled, "Call settled");
+        
+        // Transfer stake
+        let token = TokenClient::new(&env, &call.stake_token);
+        token.transfer(&staker, &env.current_contract_address(), &amount);
+        
+        // Update totals
+        if position {
+            call.total_stake_yes += amount;
+        } else {
+            call.total_stake_no += amount;
+        }
+        
+        env.storage().persistent().set(&DataKey::Call(call_id), &call);
+        
+        // Emit event
+        env.events().publish(
+            (symbol_short!("StakeAdd"), call_id),
+            (staker, position, amount)
+        );
+    }
+}
+```
+
+## 5.3 Outcome Manager (Soroban)
+
+```rust
+// packages/contracts-stellar/outcome_manager/src/lib.rs
+#![no_std]
+use soroban_sdk::{
+    contract, contractimpl, contracttype,
+    Address, BytesN, Env, Symbol, symbol_short,
+};
+
+#[contracttype]
+pub enum DataKey {
+    AuthorizedOracle(Address),
+    Settled(u64),
+    CallRegistry,
+}
+
+#[contract]
+pub struct OutcomeManager;
+
+#[contractimpl]
+impl OutcomeManager {
+    pub fn submit_outcome(
+        env: Env,
+        call_id: u64,
+        outcome: bool,
+        final_price: i128,
+        timestamp: u64,
+        public_key: BytesN<32>,
+        signature: BytesN<64>,
+    ) {
+        // Check not already settled
+        let settled: bool = env.storage().persistent()
+            .get(&DataKey::Settled(call_id))
+            .unwrap_or(false);
+        assert!(!settled, "Already settled");
+        
+        // Verify oracle is authorized
+        let oracle_addr = Address::from_contract_id(&public_key);
+        let is_authorized: bool = env.storage().instance()
+            .get(&DataKey::AuthorizedOracle(oracle_addr.clone()))
+            .unwrap_or(false);
+        assert!(is_authorized, "Unauthorized oracle");
+        
+        // Construct message to verify
+        let message = Self::build_outcome_message(&env, call_id, outcome, final_price, timestamp);
+        
+        // Verify ed25519 signature
+        env.crypto().ed25519_verify(&public_key, &message, &signature);
+        
+        // Mark settled
+        env.storage().persistent().set(&DataKey::Settled(call_id), &true);
+        
+        // Emit event
+        env.events().publish(
+            (symbol_short!("Outcome"), call_id),
+            (outcome, final_price, oracle_addr)
+        );
+    }
+    
+    fn build_outcome_message(
+        env: &Env,
+        call_id: u64,
+        outcome: bool,
+        final_price: i128,
+        timestamp: u64,
+    ) -> BytesN<64> {
+        // Construct canonical message for signing
+        // Implementation details...
+        todo!()
+    }
+}
+```
+
+## 5.4 Key Differences from Base
+
+| Aspect | Base (Solidity) | Stellar (Soroban) |
+|--------|-----------------|-------------------|
+| **Language** | Solidity | Rust |
+| **Addresses** | `0x...` (20 bytes) | `G...` or `C...` (56 chars) |
+| **Tokens** | ERC-20 contracts | Stellar Asset / SAC |
+| **Signatures** | secp256k1 + EIP-712 | ed25519 |
+| **Storage** | State variables | `env.storage()` (instance/persistent/temporary) |
+| **Events** | `emit Event(...)` | `env.events().publish(...)` |
+| **Auth** | `msg.sender` | `address.require_auth()` |
+| **Gas** | ETH gas model | Stellar resource fees |
+
+## 5.5 USDC on Stellar
+
+Stellar has **native Circle USDC** (not a smart contract):
+- Issuer: `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`
+- Asset Code: `USDC`
+- Can be wrapped as Stellar Asset Contract (SAC) for Soroban use
+
+---
+
+# 6 — Oracle & outcome verification (multi-chain: EIP-712 + ed25519)
+
+The oracle service supports both Base and Stellar with different signature schemes.
+
+## 6.1 Signing Overview
+
+| Chain | Signature Scheme | Key Type | Verification Method |
+|-------|------------------|----------|---------------------|
+| Base | EIP-712 typed data | secp256k1 | `ECDSA.recover` in Solidity |
+| Stellar | Raw message hash | ed25519 | `env.crypto().ed25519_verify()` in Soroban |
+
+## 6.2 Base: EIP-712 Flow
+
+### Why EIP-712 & Off-chain signer?
 - EIP-712 provides typed structured data; on-chain verification is straightforward.
 - Supports any off-chain price source (DexScreener), giving coverage for memecoins.
 - Scales: single signer → add multiple signers or multisig later.
 
-## 5.2 Domain / Types / Message (exact)
+### Domain / Types / Message (exact)
 
 **Domain**
 ```json
@@ -224,28 +495,77 @@ struct Call {
 }
 ```
 
-## 5.3 Backend signing & submission flow
-1. Worker picks call where `endTs <= now` and `status = OPEN`.  
-2. Query DexScreener pair endpoint to get `priceUsd` and pair metadata. If missing, fallback to GeckoTerminal.  
-3. Validate price data (freshness, liquidity). Snapshot evidence to DB or pin to IPFS.  
-4. Normalize price: `finalPrice = floor(priceUsd * 1e18)` (uint256).  
-5. Compute boolean `outcome` by comparing `finalPrice` to call condition.  
-6. Create typed data and sign using KMS (AWS KMS / HashiCorp Vault); return `signature`.  
-7. Submit signed payload to relayer which calls `submitOutcome` on OutcomeManager.  
-8. Listen for `OutcomeSubmitted` event; update DB and notify users.
-
-## 5.4 On-chain verification logic (OutcomeManager)
+### On-chain verification logic (OutcomeManager.sol)
 - Recreate digest via `_hashTypedDataV4(keccak256(...))`.
 - Recover signer via `ECDSA.recover`.
 - Check `authorizedOracle[signer]` mapping.
 - Ensure `!settled[callId]` and `block.timestamp >= calls[callId].endTs`.
 - Mark settled, store `finalPrice`, set `outcome`, emit `OutcomeSubmitted`.
 
+## 6.3 Stellar: ed25519 Flow
+
+### Why ed25519?
+- Native to Stellar ecosystem (all Stellar keys are ed25519).
+- Fast and secure; no additional libraries needed.
+- Direct verification via `env.crypto().ed25519_verify()`.
+
+### Message Format
+
+```typescript
+// Oracle constructs this message
+const message = Buffer.concat([
+  Buffer.from('BackIt:Outcome:'),
+  Buffer.from(callId.toString()),
+  Buffer.from(':'),
+  Buffer.from(outcome ? '1' : '0'),
+  Buffer.from(':'),
+  Buffer.from(finalPrice.toString()),
+  Buffer.from(':'),
+  Buffer.from(timestamp.toString()),
+]);
+
+// Sign with ed25519 private key
+const signature = nacl.sign.detached(message, privateKey);
+```
+
+### Soroban Verification
+
+```rust
+// In outcome_manager contract
+let message = Self::build_outcome_message(&env, call_id, outcome, final_price, timestamp);
+env.crypto().ed25519_verify(&public_key, &message, &signature);
+```
+
+## 6.4 Backend Signing & Submission Flow (Multi-Chain)
+
+```typescript
+// oracle.service.ts
+async signOutcome(callId: number, outcome: boolean, finalPrice: bigint, chain: 'base' | 'stellar') {
+  if (chain === 'base') {
+    return this.signEIP712(callId, outcome, finalPrice);
+  } else {
+    return this.signEd25519(callId, outcome, finalPrice);
+  }
+}
+
+private async signEIP712(callId: number, outcome: boolean, finalPrice: bigint) {
+  // Use ethers.js Wallet.signTypedData
+  const domain = { name: 'OnChainSageOutcome', version: '1', chainId: 8453, ... };
+  return this.signer.signTypedData(domain, types, { callId, outcome, finalPrice, timestamp });
+}
+
+private async signEd25519(callId: number, outcome: boolean, finalPrice: bigint) {
+  // Use tweetnacl or @stellar/stellar-sdk
+  const message = this.buildStellarMessage(callId, outcome, finalPrice);
+  return nacl.sign.detached(message, this.stellarPrivateKey);
+}
+```
+
 ---
 
-# 6 — Off-chain backend (NestJS) — detailed plan
+# 7 — Off-chain backend (NestJS) — multi-chain indexer & relayer
 
-## 6.1 Core modules
+## 7.1 Core modules
 - **AuthModule**: Smart account sessions, passkeys, embedded wallets.  
 - **CallsModule**: create drafts, IPFS pinning, calldata generation.  
 - **OracleModule**: price fetcher, signing, submission.  
@@ -254,12 +574,12 @@ struct Call {
 - **NotificationModule**: WebSocket push (socket.io) to clients.  
 - **AdminModule**: moderation, dispute handling.
 
-## 6.2 Database schema (core tables)
+## 7.2 Database schema (core tables)
 See Appendix A for full DDL. Key columns:
 - `calls.condition_json` holds condition type (target/pct/range) and parameters.
 - `participants.side` indicates which side the participant backed (UP/DOWN).
 
-## 6.3 Oracle worker behavior (pseudocode)
+## 7.3 Oracle worker behavior (multi-chain pseudocode)
 ```ts
 while(true):
   calls = db.query("SELECT ... WHERE end_ts <= now AND status = 'OPEN' FOR UPDATE SKIP LOCKED")
@@ -278,21 +598,27 @@ while(true):
     db.update(call.id, {status: 'SETTLING', finalPrice, oracle_signature: signature, evidence_cid: evidenceCid})
 ```
 
-## 6.4 Relayer & Paymaster
+## 7.4 Relayer & Paymaster (Base) / Direct Submission (Stellar)
 - Relayer submits `submitOutcome` transactions to OutcomeManager contract.
 - For user flows, Paymaster can sponsor gas for user ops; relayer interacts with Paymaster policy to approve sponsored user ops.
 - Monitor relayer spend, limit per address, and rate-limit to prevent abuse.
 
 ---
 
-# 7 — Frontend (Next.js + OnchainKit) — flows & UX details
+# 8 — Frontend — Multi-chain wallet integration (OnchainKit + Freighter)
 
-## 7.1 Onboarding
+## 8.1 Onboarding (Base)
 - Offer **passkeys** and **embedded wallet** as first option (web2-like).
 - Offer advanced users MetaMask or other wallets.
 - On first use, create an ERC-4337 Smart Account (via OnchainKit), with optional Paymaster sponsorship to fund the account.
 
-## 7.2 Create Call (detailed UI steps)
+## 8.2 Onboarding (Stellar)
+- Offer **Freighter** wallet as primary option.
+- Fallback: Lobstr, Albedo, xBull wallets.
+- No smart accounts; users connect their standard Stellar keypair.
+- Use `@stellar/freighter-api` for wallet connection.
+
+## 8.3 Create Call (detailed UI steps)
 1. Token search: `GET /tokens/search?q=` — shows token, liquidity, 24h volume, pair age.
 2. Compose: Title + thesis editor (rich text) → save (auto-upload to IPFS).
 3. Condition builder: pick `TargetPrice`, `PercentMove`, or `Range`. UI computes instant preview.
@@ -301,33 +627,44 @@ while(true):
 6. Smart account signs user op via OnchainKit UI; if user enabled, Paymaster pays gas.
 7. Show pending tx & optimistic UI entry until indexed.
 
-## 7.3 Viewing / Interaction
+## 8.4 Chain Selector
+- User picks chain (Base or Stellar) at the top of the UI.
+- Wallet connection auto-adapts based on selected chain.
+- Feed shows calls from both chains with chain badge indicator.
+
+## 8.5 Viewing / Interaction
 - Timeline: combined social + call feed (follow graph + trending).  
 - Call Detail: shows thesis, participants, live pool, comments, oracle evidence once resolved.  
 - Withdraw: users call `withdrawPayout` via smart account; UI shows claimable amount.
 
 ---
 
-# 8 — Indexing, Base RPC & Base Data API, realtime
+# 9 — Indexing — Base (ethers.js) + Stellar (Horizon/SorobanRPC)
 
-## 8.1 RPC & Provider strategy
+## 9.1 Base: RPC & Provider strategy
 - Use Alchemy or Ankr Base RPCs with primary & fallback endpoints.
 - Store keys in env & rotate as needed; throttle calls.
 
-## 8.2 Base Data API
+## 9.2 Base: Data API
 - Preferred for fast indexed reads and event history.  
 - Use for feed hydration and user-centric queries (calls by user, user stake history).
 
-## 8.3 Indexer design
-- Use Base Data API webhooks or polling to capture `CallCreated`, `StakeAdded`, `OutcomeSubmitted`, and `PayoutWithdrawn`.
-- Upsert into Postgres; update `tsvector` for search.
+## 9.3 Stellar: Horizon & SorobanRPC
+- Use **Stellar Horizon API** for account/transaction queries.
+- Use **SorobanRPC** for contract event subscriptions.
+- Subscribe to contract events via `getEvents` RPC method.
 
-## 8.4 Real-time
+## 9.4 Indexer design (Multi-Chain)
+- **Base**: Use ethers.js event listeners or Data API webhooks to capture `CallCreated`, `StakeAdded`, `OutcomeSubmitted`, `PayoutWithdrawn`.
+- **Stellar**: Poll SorobanRPC `getEvents` for contract events.
+- Upsert into Postgres with `chain` column; update `tsvector` for search.
+
+## 9.5 Real-time
 - NestJS pushes updates via Socket.io to connected clients for live feed & notifications.
 
 ---
 
-# 9 — Storage & content immutability
+# 10 — Storage & content immutability (IPFS)
 
 - **IPFS**: pin all textual content. Save CID on-chain at call creation.  
 - **Evidence pinning**: when oracle fetches price, pin JSON with the API response + timestamp to IPFS and save `evidence_cid` to DB (not necessarily on-chain) for audits.  
@@ -335,31 +672,36 @@ while(true):
 
 ---
 
-# 10 — Security, reliability & audit checklist
+# 11 — Security, reliability & audit checklist
 
-## 10.1 Contracts
+## 11.1 Base Contracts (Solidity)
 - Use Foundry for testing (unit, integration, fuzzing).  
 - Use OZ libraries: SafeERC20, ReentrancyGuard.  
 - Implement `circuitBreaker` and `onlyOwner` with multisig admin.  
 - Validate all inputs; protect against reentrancy and unexpected ERC20 behaviors.
 
-## 10.2 Keys & Oracles
+## 11.2 Stellar Contracts (Soroban)
+- Use `soroban contract build` and `soroban contract test` for testing.
+- Use Soroban SDK test utilities for unit tests.
+- Validate all inputs; use proper error handling with `panic!` or `Result`.
+
+## 11.3 Keys & Oracles
 - Oracle keys in KMS/Vault (do not export private keys).  
 - Implement rotation & emergency replacement via multisig.  
 - Log all signed messages and API evidence.
 
-## 10.3 Backend
+## 11.4 Backend
 - Rate limit endpoints & proxy.  
 - Use request validation and schema checks for DexScreener responses.  
 - Keep audit logs immutable where possible.
 
-## 10.4 Paymaster
+## 11.5 Paymaster (Base only)
 - Restrict paymaster budgets and per-account spend.  
 - Monitor abuse and enforce per-address caps.
 
 ---
 
-# 11 — Failure modes & mitigations (practical list)
+# 12 — Failure modes & mitigations (practical list)
 
 1. **Price API outage** → fallback to GeckoTerminal, else mark UNRESOLVED and escalate. Pin evidence for audits.  
 2. **Oracle signer compromise** → pause via `circuitBreaker`; replace signer via multisig; audit signed messages.  
@@ -369,25 +711,28 @@ while(true):
 
 ---
 
-# 12 — Deployments, dev tools & CI/CD
+# 13 — Deployments, dev tools & CI/CD (Foundry + Soroban)
 
-## 12.1 Foundry (primary for contracts)
+## 13.1 Base: Foundry (primary for Solidity contracts)
 - Local node: `anvil`  
 - Test: `forge test -vv`  
 - Script deploy: `forge script script/Deploy.s.sol --rpc-url $BASE_SEPOLIA_RPC --broadcast`  
 - Use `forge verify-contract` or Hardhat's verify plugin for BaseScan verification.
 
-## 12.2 Hardhat (secondary)
-- Keep for familiarity and for Etherscan/BaseScan verification plugins and some NPM ecosystem tooling.
+## 13.2 Stellar: Soroban CLI
+- Build: `soroban contract build`
+- Test: `soroban contract test`
+- Deploy: `soroban contract deploy --wasm target/wasm32-unknown-unknown/release/contract.wasm --network testnet`
+- Verify on Stellar Expert or StellarChain explorer.
 
-## 12.3 Backend & Frontend
+## 13.3 Backend & Frontend
 - NestJS & Next.js in Docker. CI runs tests, lint, and builds.  
 - Deploy Next.js to Vercel; NestJS to AWS ECS / GCP Cloud Run / Fly.io.  
 - Use GitHub Actions for pipeline: run `forge test` -> lint -> build -> deploy.
 
 ---
 
-# 13 — MVP roadmap & timelines
+# 14 — MVP roadmap & timelines
 
 **Sprint 0 (1 week)** — scaffolding  
 - Foundry skeleton + basic contract interfaces + simple tests  
@@ -409,9 +754,16 @@ while(true):
 - Liquidity checks, honeypot detectors, moderation UI  
 - Tests, Foundry fuzzing, prepare audit & multisig migration
 
+**Sprint 4 (2-3 weeks)** — Stellar integration  
+- Soroban contract development (call_registry, outcome_manager)  
+- Stellar wallet integration (Freighter)  
+- Multi-chain indexer (SorobanRPC)  
+- ed25519 oracle signing  
+- Chain selector UI
+
 ---
 
-# 14 — Appendices
+# 15 — Appendices
 
 ## Appendix A — Postgres schema (DDL simplified)
 
