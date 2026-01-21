@@ -66,6 +66,9 @@ export class Call {
   @Column({ nullable: true })
   evidenceCid: string;
 
+  @Column({ default: 'base' })
+  chain: 'base' | 'stellar';
+
   @CreateDateColumn()
   createdAt: Date;
 

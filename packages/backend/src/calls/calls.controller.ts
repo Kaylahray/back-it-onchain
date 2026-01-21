@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { CallsService } from './calls.service';
 import { Call } from './call.entity';
 
@@ -12,8 +12,8 @@ export class CallsController {
   }
 
   @Get()
-  findAll() {
-    return this.callsService.findAll();
+  findAll(@Query('chain') chain?: 'base' | 'stellar') {
+    return this.callsService.findAll({ chain });
   }
 
   @Get(':id')

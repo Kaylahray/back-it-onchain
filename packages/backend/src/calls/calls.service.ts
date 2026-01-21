@@ -15,8 +15,10 @@ export class CallsService {
     return this.callsRepository.save(call);
   }
 
-  async findAll(): Promise<Call[]> {
+  async findAll(options?: { chain?: 'base' | 'stellar' }): Promise<Call[]> {
+    const where = options?.chain ? { chain: options.chain } : {};
     return this.callsRepository.find({
+      where,
       order: { createdAt: 'DESC' },
       relations: ['creator']
     });
