@@ -39,13 +39,13 @@ export interface User {
 }
 
 interface GlobalStateContextType {
-    calls: Call[];
-    createCall: (call: Omit<Call, 'id' | 'creator' | 'status' | 'createdAt' | 'backers' | 'comments' | 'volume' | 'totalStakeYes' | 'totalStakeNo' | 'stakeToken' | 'endTs' | 'conditionJson'>) => Promise<void>;
-    stakeOnCall: (callId: string, amount: number, type: 'back' | 'challenge') => Promise<void>;
-    currentUser: User | null;
-    isLoading: boolean;
-    login: () => Promise<void>;
-    updateProfile: (data: { handle: string; bio: string }) => Promise<void>;
+  calls: Call[];
+  createCall: (call: Omit<Call, 'id' | 'creator' | 'status' | 'createdAt' | 'backers' | 'comments' | 'volume' | 'totalStakeYes' | 'totalStakeNo' | 'stakeToken' | 'endTs' | 'conditionJson'>) => Promise<void>;
+  stakeOnCall: (callId: string, amount: number, type: 'back' | 'challenge') => Promise<void>;
+  currentUser: User | null;
+  isLoading: boolean;
+  login: () => Promise<void>;
+  updateProfile: (data: { handle: string; bio: string }) => Promise<void>;
 }
 
 const GlobalStateContext = createContext<GlobalStateContextType | undefined>(
@@ -53,36 +53,19 @@ const GlobalStateContext = createContext<GlobalStateContextType | undefined>(
 );
 
 export function GlobalStateProvider({ children }: { children: React.ReactNode }) {
-    const [calls, setCalls] = useState<Call[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [calls, setCalls] = useState<Call[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-    const { writeContractAsync } = useWriteContract();
-    const publicClient = usePublicClient();
-    const { address: evmAddress, isConnected: isEvmConnected } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
+  const { address: evmAddress, isConnected: isEvmConnected } = useAccount();
 
-    // Multi-chain support
-    const { selectedChain } = useChain();
-    const { publicKey: stellarAddress, isConnected: isStellarConnected } = useStellarWallet();
+  const { selectedChain } = useChain();
+  const { publicKey: stellarAddress, isConnected: isStellarConnected } = useStellarWallet();
 
-    // Determine active wallet based on selected chain
-    const address = selectedChain === 'stellar' ? stellarAddress : evmAddress;
-    const isConnected = selectedChain === 'stellar' ? isStellarConnected : isEvmConnected;
-
-  useEffect(() => {
-    const storedChain = localStorage.getItem("selectedChain");
-    if (storedChain === "base" || storedChain === "stellar") {
-      setSelectedChainState(storedChain);
-    }
-  }, []);
-
-  const setSelectedChain = (chain: "base" | "stellar") => {
-    setSelectedChainState(chain);
-    localStorage.setItem("selectedChain", chain);
-    if (isConnected) {
-      disconnect();
-    }
-  };
+  const address = selectedChain === 'stellar' ? stellarAddress : evmAddress;
+  const isConnected = selectedChain === 'stellar' ? isStellarConnected : isEvmConnected;
 
   const fetchCalls = async () => {
     try {
@@ -90,27 +73,11 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
       if (!res.ok) throw new Error("Failed to fetch calls");
       const data = await res.json();
 
-    const login = async () => {
-        if (!address) return;
-        setIsLoading(true);
-        try {
-            const res = await fetch('http://localhost:3001/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    wallet: address,
-                    chain: selectedChain,
-                }),
-            });
-            const user = await res.json();
-            setCurrentUser(user);
-        } catch (error) {
-            console.error("Login failed:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
+      // Map backend data to Call interface
+      const mappedCalls: Call[] = data.map((item: any) => ({
+        id: item.callOnchainId || item.id,
+        ...item
+      }));
       setCalls(mappedCalls);
     } catch (error) {
       console.error("Failed to fetch calls:", error);
@@ -124,10 +91,15 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
       const res = await fetch("http://localhost:3001/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: address }),
+        body: JSON.stringify({
+          wallet: address,
+          chain: selectedChain,
+        }),
       });
-      const user = await res.json();
-      setCurrentUser(user);
+      if (res.ok) {
+        const user = await res.json();
+        setCurrentUser(user);
+      }
     } catch (error) {
       console.error("Login failed:", error);
     } finally {
@@ -135,56 +107,55 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
     }
   };
 
-    useEffect(() => {
-        if (isConnected && address) {
-            login();
-        }
-    }, [isConnected, address, selectedChain]);
-
-    const createCall = async (newCallData: Omit<Call, 'id' | 'creator' | 'status' | 'createdAt' | 'backers' | 'comments' | 'volume' | 'totalStakeYes' | 'totalStakeNo' | 'stakeToken' | 'endTs' | 'conditionJson'>) => {
-        if (!currentUser) {
-            alert("Please connect wallet first");
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const stakeAmount = parseEther(newCallData.stake.split(' ')[0]); // Assuming "100 USDC" format
-            const tokenAddress = process.env.NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
-            const registryAddress = process.env.NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
+  const updateProfile = async (data: { handle: string; bio: string }) => {
+    if (!address) return;
+    setIsLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/users/${address}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const updatedUser = await res.json();
+        setCurrentUser(updatedUser);
+      } else {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to update profile");
+      }
+    } catch (error) {
+      console.error("Profile update failed:", error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (isConnected && address) {
       login();
     }
-  }, [isConnected, address]);
+  }, [isConnected, address, selectedChain]);
 
-  const createCall = async (
-    newCallData: Omit<
-      Call,
-      | "id"
-      | "creator"
-      | "status"
-      | "createdAt"
-      | "backers"
-      | "comments"
-      | "volume"
-      | "stakeToken"
-      | "totalStakeYes"
-      | "totalStakeNo"
-      | "endTs"
-    >,
-  ) => {
+  useEffect(() => {
+    fetchCalls();
+  }, []);
+
+  const createCall = async (newCallData: Omit<Call, 'id' | 'creator' | 'status' | 'createdAt' | 'backers' | 'comments' | 'volume' | 'totalStakeYes' | 'totalStakeNo' | 'stakeToken' | 'endTs' | 'conditionJson'>) => {
     if (!currentUser) {
       alert("Please connect wallet first");
       return;
     }
     setIsLoading(true);
     try {
-      const stakeAmount = parseEther(newCallData.stake.split(" ")[0]); // Assuming "100 USDC" format
-      const tokenAddress = process.env
-        .NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
-      const registryAddress = process.env
-        .NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
+      if (selectedChain === 'stellar') {
+        alert("Stellar call creation not implemented yet");
+        return;
+      }
+
+      const stakeAmount = parseEther(newCallData.stake.split(" ")[0]);
+      const tokenAddress = process.env.NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
+      const registryAddress = process.env.NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
 
       // 1. Upload Metadata to Mock IPFS
       const metadata = {
@@ -201,39 +172,31 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
         body: JSON.stringify(metadata),
       });
       const { cid } = await ipfsRes.json();
-      console.log("Uploaded metadata, CID:", cid);
 
       // 2. Approve Token
-      console.log("Approving token...");
       const approveTx = await writeContractAsync({
         address: tokenAddress,
         abi: ERC20ABI,
         functionName: "approve",
         args: [registryAddress, stakeAmount],
       });
-      console.log("Approve Tx:", approveTx);
-      // Wait for approval receipt
       await publicClient?.waitForTransactionReceipt({ hash: approveTx });
 
       // 3. Create Call
-      console.log("Creating call...");
-      const deadlineTimestamp = Math.floor(
-        new Date(newCallData.deadline).getTime() / 1000,
-      );
+      const deadlineTimestamp = Math.floor(new Date(newCallData.deadline).getTime() / 1000);
       const createTx = await writeContractAsync({
         address: registryAddress,
         abi: CallRegistryABI,
         functionName: "createCall",
         args: [
-          tokenAddress, // _stakeToken
-          stakeAmount, // _stakeAmount
-          BigInt(deadlineTimestamp), // _endTs
-          tokenAddress, // _tokenAddress (Asset being predicted - using same token for now)
-          stringToHex(newCallData.asset, { size: 32 }), // _pairId (Mocking with asset name)
-          cid, // _ipfsCID (Mocking IPFS)
+          tokenAddress,
+          stakeAmount,
+          BigInt(deadlineTimestamp),
+          tokenAddress,
+          stringToHex(newCallData.asset, { size: 32 }),
+          cid,
         ],
       });
-      console.log("Create Call Tx:", createTx);
       await publicClient?.waitForTransactionReceipt({ hash: createTx });
 
       // Optimistic Update
@@ -258,8 +221,7 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
       };
       setCalls((prev) => [newCall, ...prev]);
 
-      // Refresh calls from backend after some delay for indexer
-      setTimeout(fetchCalls, 8000); // Increased to 8s for local anvil indexing + backend processing
+      setTimeout(fetchCalls, 8000);
     } catch (error) {
       console.error("Failed to create call:", error);
       alert("Failed to create call. See console for details.");
@@ -268,20 +230,18 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
     }
   };
 
-  const stakeOnCall = async (
-    callId: string,
-    amount: number,
-    type: "back" | "challenge",
-  ) => {
+  const stakeOnCall = async (callId: string, amount: number, type: "back" | "challenge") => {
     setIsLoading(true);
     try {
-      const stakeAmount = parseEther(amount.toString());
-      const tokenAddress = process.env
-        .NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
-      const registryAddress = process.env
-        .NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
+      if (selectedChain === 'stellar') {
+        alert("Stellar staking not implemented yet");
+        return;
+      }
 
-      // 1. Approve Token
+      const stakeAmount = parseEther(amount.toString());
+      const tokenAddress = process.env.NEXT_PUBLIC_MOCK_TOKEN_ADDRESS as `0x${string}`;
+      const registryAddress = process.env.NEXT_PUBLIC_CALL_REGISTRY_ADDRESS as `0x${string}`;
+
       const approveTx = await writeContractAsync({
         address: tokenAddress,
         abi: ERC20ABI,
@@ -290,8 +250,7 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
       });
       await publicClient?.waitForTransactionReceipt({ hash: approveTx });
 
-      // 2. Stake
-      const position = type === "back"; // true for YES (Back), false for NO (Challenge)
+      const position = type === "back";
       const stakeTx = await writeContractAsync({
         address: registryAddress,
         abi: CallRegistryABI,
@@ -303,8 +262,7 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
       setCalls((prev) =>
         prev.map((call) => {
           if (call.id === callId) {
-            const currentVolume =
-              parseFloat(call.volume.replace(/[^0-9.-]+/g, "")) || 0;
+            const currentVolume = parseFloat(call.volume.replace(/[^0-9.-]+/g, "")) || 0;
             const newVolume = currentVolume + amount;
             return {
               ...call,
@@ -333,8 +291,6 @@ export function GlobalStateProvider({ children }: { children: React.ReactNode })
         isLoading,
         login,
         updateProfile,
-        selectedChain,
-        setSelectedChain,
       }}
     >
       {children}

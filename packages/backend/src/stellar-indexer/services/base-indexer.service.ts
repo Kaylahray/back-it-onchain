@@ -15,14 +15,15 @@ export interface BaseIndexerConfig {
 @Injectable()
 export class BaseIndexerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BaseIndexerService.name);
-  private pollInterval: NodeJS.Timer;
+  private pollInterval: NodeJS.Timeout;
+
   private isRunning = false;
   private currentBlock: number;
   private config: BaseIndexerConfig;
 
   constructor(
     private callRepository: Repository<Call>,
-  ) {}
+  ) { }
 
   async initialize(config: BaseIndexerConfig): Promise<void> {
     this.config = {
@@ -107,13 +108,14 @@ export class BaseIndexerService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.debug(`Base indexer polling at block ${this.currentBlock}`);
     } catch (error) {
-      if (retryCount < this.config.maxRetries) {
+      if (this.config && retryCount < (this.config.maxRetries || 0)) {
         this.logger.warn(
           `Failed to fetch events (attempt ${retryCount + 1}/${this.config.maxRetries}), retrying...`,
         );
-        await this.delay(this.config.retryDelayMs);
+        await this.delay(this.config.retryDelayMs || 0);
         return this.fetchAndProcessEvents(retryCount + 1);
       }
+
 
       this.logger.error('Max retries reached, skipping this poll cycle:', error);
     }

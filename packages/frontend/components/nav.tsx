@@ -6,6 +6,8 @@ import { Home, Search, PlusSquare, Bell, User, LogOut } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ChainSelector } from "@/components/ChainSelector";
 import { useGlobalState } from "@/components/GlobalState";
+import { useChain } from "@/components/ChainProvider";
+
 import { cn } from "@/lib/utils";
 import {
   Wallet,
@@ -23,7 +25,8 @@ import {
 } from "@coinbase/onchainkit/identity";
 
 export function Nav() {
-  const { selectedChain } = useGlobalState();
+  const { selectedChain } = useChain();
+
   const pathname = usePathname();
 
   const navItems = [

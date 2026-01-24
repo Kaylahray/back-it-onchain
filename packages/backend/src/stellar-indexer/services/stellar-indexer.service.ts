@@ -1,7 +1,8 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Repository } from 'typeorm';
-import { SorobanRpc } from '@stellar/stellar-sdk';
+import { rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import * as StellarSdk from '@stellar/stellar-sdk';
+
 import { Call, ChainType } from '../entities/call.entity';
 
 export interface StellarIndexerConfig {
@@ -26,7 +27,8 @@ export interface ParsedSorobanEvent {
 export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StellarIndexerService.name);
   private sorobanRpc: SorobanRpc.Server;
-  private pollInterval: NodeJS.Timer;
+  private pollInterval: NodeJS.Timeout;
+
   private isRunning = false;
   private currentLedger: number;
   private config: StellarIndexerConfig;
@@ -145,13 +147,14 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
 
       this.currentLedger = toLedger + 1;
     } catch (error) {
-      if (retryCount < this.config.maxRetries) {
+      if (this.config && retryCount < (this.config.maxRetries || 0)) {
         this.logger.warn(
-          `Failed to fetch events (attempt ${retryCount + 1}/${this.config.maxRetries}), retrying...`,
+          `Failed to fetch events (attempt ${retryCount + 1}/${this.config.maxRetries || 0}), retrying...`,
         );
-        await this.delay(this.config.retryDelayMs);
+        await this.delay(this.config.retryDelayMs || 0);
         return this.fetchAndProcessEvents(retryCount + 1);
       }
+
 
       this.logger.error('Max retries reached, skipping this poll cycle:', error);
     }
@@ -202,37 +205,19 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private parseEvent(
-    event: SorobanRpc.EventResponse,
+    event: SorobanRpc.Api.EventResponse,
     contractId: string,
   ): ParsedSorobanEvent {
     try {
-      // Extract XDR data
-      const eventXdr = event.type === 'contract' ? event.contract : null;
-      if (!eventXdr) {
-        throw new Error('Invalid event structure');
-      }
-
       // Decode the event topics and data
-      const topics: StellarSdk.xdr.ScVal[] = [];
-      const data: StellarSdk.xdr.ScVal[] = [];
-
-      // Parse topics
-      if (eventXdr.topics && eventXdr.topics.length > 0) {
-        for (const topic of eventXdr.topics) {
-          topics.push(StellarSdk.xdr.ScVal.fromXDR(topic, 'base64'));
-        }
-      }
-
-      // Parse data
-      if (eventXdr.data) {
-        data.push(StellarSdk.xdr.ScVal.fromXDR(eventXdr.data, 'base64'));
-      }
+      const topics: StellarSdk.xdr.ScVal[] = event.topic;
+      const data: StellarSdk.xdr.ScVal = event.value;
 
       // Determine event type from topics
       const eventType = this.getEventType(topics);
 
       // Decode the data payload
-      const decodedData = this.decodeEventData(topics, data);
+      const decodedData = this.decodeEventData(topics, [data]);
 
       return {
         type: eventType,
@@ -248,6 +233,7 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+
   private getEventType(topics: StellarSdk.xdr.ScVal[]): string {
     // The first topic typically contains the event type as a symbol
     if (topics.length === 0) {
@@ -256,10 +242,11 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
 
     const topicType = topics[0].switch();
 
-    if (topicType === StellarSdk.xdr.ScValType.scvTypeSymbol()) {
-      const symbol = topics[0].sym().toString('utf-8');
+    if (topicType === StellarSdk.xdr.ScValType.scvSymbol()) {
+      const symbol = topics[0].sym().toString();
       return this.mapEventTypeName(symbol);
     }
+
 
     return 'Unknown';
   }
@@ -303,36 +290,37 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     const type = scVal.switch();
 
     switch (type) {
-      case StellarSdk.xdr.ScValType.scvTypeU32():
+      case StellarSdk.xdr.ScValType.scvU32():
         return scVal.u32().toString();
 
-      case StellarSdk.xdr.ScValType.scvTypeU64():
+      case StellarSdk.xdr.ScValType.scvU64():
         return scVal.u64().toString();
 
-      case StellarSdk.xdr.ScValType.scvTypeI32():
+      case StellarSdk.xdr.ScValType.scvI32():
         return scVal.i32().toString();
 
-      case StellarSdk.xdr.ScValType.scvTypeI64():
+      case StellarSdk.xdr.ScValType.scvI64():
         return scVal.i64().toString();
 
-      case StellarSdk.xdr.ScValType.scvTypeSymbol():
-        return scVal.sym().toString('utf-8');
+      case StellarSdk.xdr.ScValType.scvSymbol():
+        return scVal.sym().toString();
 
-      case StellarSdk.xdr.ScValType.scvTypeBytes():
+      case StellarSdk.xdr.ScValType.scvBytes():
         return scVal.bytes().toString('hex');
 
-      case StellarSdk.xdr.ScValType.scvTypeAddress():
+      case StellarSdk.xdr.ScValType.scvAddress():
         const addr = scVal.address();
-        return addr.switch().name === 'ScAddressTypeAccountId'
+        return addr.switch().name === 'scAddressTypeAccount'
           ? StellarSdk.StrKey.encodeEd25519PublicKey(
-              addr.accountId().ed25519().buffer,
-            )
-          : addr.contractId().toString('hex');
+            Buffer.from(addr.accountId().ed25519()),
+          )
+          : addr.contractId().toString();
 
-      case StellarSdk.xdr.ScValType.scvTypeVec():
-        return scVal.vec().map((v) => this.decodeScVal(v));
+      case StellarSdk.xdr.ScValType.scvVec():
+        const vec = scVal.vec();
+        return vec ? vec.map((v) => this.decodeScVal(v)) : [];
 
-      case StellarSdk.xdr.ScValType.scvTypeMap():
+      case StellarSdk.xdr.ScValType.scvMap():
         const map: Record<string, any> = {};
         const entries = scVal.map();
         if (entries) {
@@ -344,8 +332,9 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
         }
         return map;
 
-      case StellarSdk.xdr.ScValType.scvTypeBool():
+      case StellarSdk.xdr.ScValType.scvBool():
         return scVal.b();
+
 
       default:
         return null;

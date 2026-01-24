@@ -28,7 +28,7 @@ export class MultiChainIndexerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly stellarIndexer: StellarIndexerService,
     private readonly baseIndexer: BaseIndexerService,
-  ) {}
+  ) { }
 
   async initialize(config: MultiChainIndexerConfig): Promise<void> {
     this.config = {
@@ -86,7 +86,8 @@ export class MultiChainIndexerService implements OnModuleInit, OnModuleDestroy {
     this.isRunning = true;
     this.logger.log('Starting Multi-Chain Indexer...');
 
-    const startPromises = [];
+    const startPromises: Promise<void | void[]>[] = [];
+
 
     if (this.config.enableStellar) {
       startPromises.push(
@@ -117,7 +118,8 @@ export class MultiChainIndexerService implements OnModuleInit, OnModuleDestroy {
     this.isRunning = false;
     this.logger.log('Stopping Multi-Chain Indexer...');
 
-    const stopPromises = [];
+    const stopPromises: Promise<void | void[]>[] = [];
+
 
     if (this.config.enableStellar) {
       stopPromises.push(
@@ -151,8 +153,9 @@ export class MultiChainIndexerService implements OnModuleInit, OnModuleDestroy {
   } {
     return {
       isRunning: this.isRunning,
-      stellarEnabled: this.config.enableStellar,
-      baseEnabled: this.config.enableBase,
+      stellarEnabled: !!this.config?.enableStellar,
+      baseEnabled: !!this.config?.enableBase,
+
     };
   }
 }
