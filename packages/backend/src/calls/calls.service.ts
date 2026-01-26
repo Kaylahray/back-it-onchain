@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Call } from './call.entity';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class CallsService {
@@ -29,10 +32,6 @@ export class CallsService {
   }
 
   async uploadIpfs(data: any): Promise<{ cid: string }> {
-    const fs = require('fs');
-    const path = require('path');
-    const crypto = require('crypto');
-
     const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
@@ -40,22 +39,20 @@ export class CallsService {
 
     const content = JSON.stringify(data);
     const hash = crypto.createHash('sha256').update(content).digest('hex');
-    const cid = `Qm${hash.substring(0, 44)}`; // Mock CID format
+    const cid = `Qm${hash.substring(0, 44)} `; // Mock CID format
 
     fs.writeFileSync(path.join(uploadsDir, cid), content);
-    return { cid };
+    return Promise.resolve({ cid });
   }
 
   async getIpfs(cid: string): Promise<any> {
-    const fs = require('fs');
-    const path = require('path');
     const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
     const filePath = path.join(uploadsDir, cid);
 
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, 'utf-8');
-      return JSON.parse(content);
+      return Promise.resolve(JSON.parse(content));
     }
-    return null;
+    return Promise.resolve(null);
   }
 }

@@ -92,12 +92,12 @@ export class OracleService {
    * @param timestamp - Unix timestamp when the outcome was determined
    * @returns Buffer containing 64-byte ed25519 signature (compatible with BytesN<64>)
    */
-  async signStellarOutcome(
+  signStellarOutcome(
     callId: number,
     outcome: boolean,
     finalPrice: number,
     timestamp: number,
-  ): Promise<Buffer> {
+  ): Buffer {
     if (!this.stellarKeypair) {
       throw new Error('Stellar keypair not configured');
     }
@@ -132,7 +132,7 @@ export class OracleService {
     timestamp: number,
   ): Promise<string> {
     if (chain === 'stellar') {
-      const signature = await this.signStellarOutcome(
+      const signature = this.signStellarOutcome(
         callId,
         outcome,
         finalPrice,

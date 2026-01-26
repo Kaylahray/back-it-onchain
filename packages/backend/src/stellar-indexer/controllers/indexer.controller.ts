@@ -12,7 +12,8 @@ export class IndexerController {
   ) {}
 
   @Post('stellar/initialize')
-  async initializeStellarIndexer(config) {
+  async initializeStellarIndexer(@Body() config: any) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     await this.stellarIndexer.initialize(config);
     return { message: 'Stellar indexer initialized' };
   }
@@ -35,12 +36,12 @@ export class IndexerController {
   }
 
   @Get('stellar/events/:eventType')
-  async getStellarEventsByType(eventType) {
+  async getStellarEventsByType(@Param('eventType') eventType: string) {
     return this.stellarIndexer.getEventsByType(eventType);
   }
 
   @Get('stellar/events/contract/:contractId')
-  async getStellarEventsByContract(contractId) {
+  async getStellarEventsByContract(@Param('contractId') contractId: string) {
     return this.stellarIndexer.getEventsByContract(contractId);
   }
 
@@ -50,7 +51,9 @@ export class IndexerController {
   }
 
   @Get('base/events/contract/:contractAddress')
-  async getBaseEventsByContract(contractAddress) {
+  async getBaseEventsByContract(
+    @Param('contractAddress') contractAddress: string,
+  ) {
     return this.baseIndexer.getEventsByContract(contractAddress);
   }
 

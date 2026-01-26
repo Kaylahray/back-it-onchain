@@ -74,15 +74,15 @@ export class IndexerService implements OnModuleInit {
         if ('args' in event && event.args) {
           const args = event.args;
           await this.handleCallCreated(
-            args[0],
-            args[1],
-            args[2],
-            args[3],
-            args[4],
-            args[5],
-            args[6],
-            args[7],
-            args[8],
+            args[0] as bigint,
+            args[1] as string,
+            args[2] as string,
+            args[3] as bigint,
+            args[4] as bigint,
+            args[5] as bigint,
+            args[6] as string,
+            args[7] as string,
+            args[8] as string,
           );
         }
       }
@@ -90,7 +90,12 @@ export class IndexerService implements OnModuleInit {
       for (const event of stakeAddedEvents) {
         if ('args' in event && event.args) {
           const args = event.args;
-          await this.handleStakeAdded(args[0], args[1], args[2], args[3]);
+          await this.handleStakeAdded(
+            args[0] as bigint,
+            args[1] as string,
+            args[2] as boolean,
+            args[3] as bigint,
+          );
         }
       }
     } catch (error) {
@@ -99,15 +104,15 @@ export class IndexerService implements OnModuleInit {
   }
 
   async handleCallCreated(
-    callId: any,
-    creator: any,
-    stakeToken: any,
-    stakeAmount: any,
-    startTs: any,
-    endTs: any,
-    tokenAddress: any,
-    pairId: any,
-    ipfsCID: any,
+    callId: bigint,
+    creator: string,
+    stakeToken: string,
+    stakeAmount: bigint,
+    startTs: bigint,
+    endTs: bigint,
+    tokenAddress: string,
+    pairId: string,
+    ipfsCID: string,
   ) {
     const existing = await this.callsRepository.findOne({
       where: { callOnchainId: callId.toString() },
@@ -117,7 +122,7 @@ export class IndexerService implements OnModuleInit {
     console.log(`Processing CallCreated: ${callId} by ${creator}`);
     await this.authService.validateUser(creator);
 
-    let conditionJson = {};
+    let conditionJson: any = {};
     if (ipfsCID && ipfsCID.length > 0) {
       try {
         conditionJson = await this.fetchIpfsData(ipfsCID);
@@ -137,14 +142,14 @@ export class IndexerService implements OnModuleInit {
       tokenAddress,
       pairId,
       ipfsCid: ipfsCID,
-      conditionJson,
+      conditionJson: conditionJson as Record<string, any>,
       status: 'active',
     });
 
     await this.callsRepository.save(call);
   }
 
-  async fetchIpfsData(cid: string): Promise<any> {
+  async fetchIpfsData(cid: string): Promise<Record<string, any>> {
     if (cid === 'QmMockCID') {
       return {
         title: 'ETH will flip BTC',
@@ -166,16 +171,22 @@ export class IndexerService implements OnModuleInit {
       try {
         const response = await fetch(url);
         if (response.ok) {
-          return await response.json();
+          return (await response.json()) as Record<string, any>;
         }
       } catch (error) {
+        console.error(`Error fetching from ${url}:`, error);
         continue;
       }
     }
-    return {};
+    return {} as Record<string, any>;
   }
 
-  async handleStakeAdded(callId: any, staker: any, position: any, amount: any) {
+  async handleStakeAdded(
+    callId: bigint,
+    staker: string,
+    position: boolean,
+    amount: bigint,
+  ) {
     console.log(
       `Processing StakeAdded to Call ${callId}: ${amount} on ${position ? 'YES' : 'NO'}`,
     );
@@ -207,20 +218,20 @@ export class IndexerService implements OnModuleInit {
       this.provider,
     );
 
-    contract.on(
+    void contract.on(
       'CallCreated',
       (
-        callId,
-        creator,
-        stakeToken,
-        stakeAmount,
-        startTs,
-        endTs,
-        tokenAddress,
-        pairId,
-        ipfsCID,
-      ) =>
-        this.handleCallCreated(
+        callId: bigint,
+        creator: string,
+        stakeToken: string,
+        stakeAmount: bigint,
+        startTs: bigint,
+        endTs: bigint,
+        tokenAddress: string,
+        pairId: string,
+        ipfsCID: string,
+      ) => {
+        void this.handleCallCreated(
           callId,
           creator,
           stakeToken,
@@ -230,10 +241,18 @@ export class IndexerService implements OnModuleInit {
           tokenAddress,
           pairId,
           ipfsCID,
-        ),
+        ).catch((err) =>
+          console.error('[Indexer] Error handling CallCreated:', err),
+        );
+      },
     );
-    contract.on('StakeAdded', (callId, staker, position, amount) =>
-      this.handleStakeAdded(callId, staker, position, amount),
+    void contract.on(
+      'StakeAdded',
+      (callId: bigint, staker: string, position: boolean, amount: bigint) => {
+        void this.handleStakeAdded(callId, staker, position, amount).catch(
+          (err) => console.error('[Indexer] Error handling StakeAdded:', err),
+        );
+      },
     );
   }
 }

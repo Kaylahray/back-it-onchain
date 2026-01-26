@@ -5,7 +5,6 @@ import { Keypair } from '@stellar/stellar-sdk';
 
 describe('OracleService', () => {
   let service: OracleService;
-  let configService: ConfigService;
 
   // Test keypair with known values for verification
   // Secret: SCXJ4DAPQMXLKP3QITADMVLNX5Q7PV4L3BQKVME4N6TL5M2VJJYR7FAS
@@ -37,7 +36,6 @@ describe('OracleService', () => {
     }).compile();
 
     service = module.get<OracleService>(OracleService);
-    configService = module.get<ConfigService>(ConfigService);
   });
 
   describe('Stellar ed25519 signing', () => {
@@ -50,13 +48,13 @@ describe('OracleService', () => {
       expect(publicKey).toBe(TEST_PUBLIC_KEY);
     });
 
-    it('should sign Stellar outcome with ed25519', async () => {
+    it('should sign Stellar outcome with ed25519', () => {
       const callId = 1;
       const outcome = true;
       const finalPrice = 1000;
       const timestamp = 1234567890;
 
-      const signature = await service.signStellarOutcome(
+      const signature = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,
@@ -68,20 +66,20 @@ describe('OracleService', () => {
       expect(signature.length).toBe(64);
     });
 
-    it('should produce consistent signatures for same input', async () => {
+    it('should produce consistent signatures for same input', () => {
       const callId = 1;
       const outcome = true;
       const finalPrice = 1000;
       const timestamp = 1234567890;
 
-      const signature1 = await service.signStellarOutcome(
+      const signature1 = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,
         timestamp,
       );
 
-      const signature2 = await service.signStellarOutcome(
+      const signature2 = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,
@@ -91,13 +89,13 @@ describe('OracleService', () => {
       expect(signature1.toString('hex')).toBe(signature2.toString('hex'));
     });
 
-    it('should verify signature with Stellar SDK', async () => {
+    it('should verify signature with Stellar SDK', () => {
       const callId = 1;
       const outcome = true;
       const finalPrice = 1000;
       const timestamp = 1234567890;
 
-      const signature = await service.signStellarOutcome(
+      const signature = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,
@@ -115,21 +113,21 @@ describe('OracleService', () => {
       expect(isValid).toBe(true);
     });
 
-    it('should produce different signatures for different inputs', async () => {
+    it('should produce different signatures for different inputs', () => {
       const callId1 = 1;
       const callId2 = 2;
       const outcome = true;
       const finalPrice = 1000;
       const timestamp = 1234567890;
 
-      const signature1 = await service.signStellarOutcome(
+      const signature1 = service.signStellarOutcome(
         callId1,
         outcome,
         finalPrice,
         timestamp,
       );
 
-      const signature2 = await service.signStellarOutcome(
+      const signature2 = service.signStellarOutcome(
         callId2,
         outcome,
         finalPrice,
@@ -139,13 +137,13 @@ describe('OracleService', () => {
       expect(signature1.toString('hex')).not.toBe(signature2.toString('hex'));
     });
 
-    it('should handle outcome=false correctly', async () => {
+    it('should handle outcome=false correctly', () => {
       const callId = 1;
       const outcome = false;
       const finalPrice = 500;
       const timestamp = 1234567890;
 
-      const signature = await service.signStellarOutcome(
+      const signature = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,
@@ -226,14 +224,14 @@ describe('OracleService', () => {
   });
 
   describe('Test vectors for Soroban verification', () => {
-    it('should produce expected signature for test vector 1', async () => {
+    it('should produce expected signature for test vector 1', () => {
       // Test vector 1
       const callId = 42;
       const outcome = true;
       const finalPrice = 50000;
       const timestamp = 1700000000;
 
-      const signature = await service.signStellarOutcome(
+      const signature = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,
@@ -257,14 +255,14 @@ describe('OracleService', () => {
       console.log('Signature (base64):', signature.toString('base64'));
     });
 
-    it('should produce expected signature for test vector 2', async () => {
+    it('should produce expected signature for test vector 2', () => {
       // Test vector 2
       const callId = 123;
       const outcome = false;
       const finalPrice = 25000;
       const timestamp = 1705000000;
 
-      const signature = await service.signStellarOutcome(
+      const signature = service.signStellarOutcome(
         callId,
         outcome,
         finalPrice,

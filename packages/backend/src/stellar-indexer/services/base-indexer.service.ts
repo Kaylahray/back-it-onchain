@@ -6,7 +6,13 @@ import {
 } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { Call, ChainType } from '../entities/call.entity';
-import { InjectRepository } from '@nestjs/typeorm';
+// import { InjectRepository } from '@nestjs/typeorm'; // This was replaced by mistake, but I need to make sure I don't leave duplicates.
+// The previous tool execution replaced:
+// import { InjectRepository } from '@nestjs/typeorm';
+// with:
+// import { Call, ChainType } from '../entities/call.entity';
+// resulting in two lines of the same import.
+// I will just remove one of them.
 
 export interface BaseIndexerConfig {
   rpcUrl: string;
@@ -40,6 +46,7 @@ export class BaseIndexerService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(`Base Indexer initialized with RPC: ${this.config.rpcUrl}`);
     this.logger.log(`Monitoring contract: ${this.config.contractAddress}`);
+    return Promise.resolve();
   }
 
   async onModuleInit(): Promise<void> {
@@ -67,6 +74,7 @@ export class BaseIndexerService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Starting Base Indexer...');
 
     this.pollForEvents();
+    return Promise.resolve();
   }
 
   async stop(): Promise<void> {
@@ -80,19 +88,22 @@ export class BaseIndexerService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log('Base Indexer stopped');
+    return Promise.resolve();
   }
 
   private pollForEvents(): void {
-    this.pollInterval = setInterval(async () => {
+    this.pollInterval = setInterval(() => {
       if (!this.isRunning) {
         return;
       }
 
-      try {
-        await this.fetchAndProcessEvents();
-      } catch (error) {
-        this.logger.error('Error during event polling:', error);
-      }
+      void (async () => {
+        try {
+          await this.fetchAndProcessEvents();
+        } catch (error) {
+          this.logger.error('Error during event polling:', error);
+        }
+      })();
     }, this.config.pollIntervalMs);
 
     // Initial poll immediately

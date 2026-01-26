@@ -27,7 +27,6 @@ interface Call {
     endTs: number;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     conditionJson?: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     creatorWallet?: string; // Add creatorWallet if it's part of the raw data
     pairId?: string; // Add pairId if it's part of the raw data
     callOnchainId?: string; // Add callOnchainId if it's part of the raw data

@@ -25,6 +25,7 @@ export interface ParsedSorobanEvent {
   ledger: number;
   txHash: string;
   sequence: number;
+
   data: Record<string, any>;
 }
 
@@ -60,6 +61,7 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       `Monitoring contracts: ${this.config.contractIds.join(', ')}`,
     );
+    return Promise.resolve();
   }
 
   async onModuleInit(): Promise<void> {
@@ -71,6 +73,7 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.start();
+    return Promise.resolve();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -111,19 +114,22 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log('Stellar Indexer stopped');
+    return Promise.resolve();
   }
 
   private pollForEvents(): void {
-    this.pollInterval = setInterval(async () => {
+    this.pollInterval = setInterval(() => {
       if (!this.isRunning) {
         return;
       }
 
-      try {
-        await this.fetchAndProcessEvents();
-      } catch (error) {
-        this.logger.error('Error during event polling:', error);
-      }
+      void (async () => {
+        try {
+          await this.fetchAndProcessEvents();
+        } catch (error) {
+          this.logger.error('Error during event polling:', error);
+        }
+      })();
     }, this.config.pollIntervalMs);
 
     // Initial poll immediately
@@ -174,6 +180,7 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
   private async fetchContractEvents(
     contractId: string,
     startLedger: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     endLedger: number,
   ): Promise<void> {
     try {
@@ -281,11 +288,13 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     try {
       // Decode topics (skip first topic which is the event type)
       for (let i = 1; i < topics.length; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         decoded[`topic_${i}`] = this.decodeScVal(topics[i]);
       }
 
       // Decode data
       for (let i = 0; i < data.length; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         decoded[`data_${i}`] = this.decodeScVal(data[i]);
       }
     } catch (error) {
@@ -317,29 +326,36 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
       case StellarSdk.xdr.ScValType.scvBytes():
         return scVal.bytes().toString('hex');
 
-      case StellarSdk.xdr.ScValType.scvAddress():
+      case StellarSdk.xdr.ScValType.scvAddress(): {
         const addr = scVal.address();
         return addr.switch().name === 'scAddressTypeAccount'
           ? StellarSdk.StrKey.encodeEd25519PublicKey(
               Buffer.from(addr.accountId().ed25519()),
             )
-          : addr.contractId().toString();
+          : // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+            StellarSdk.StrKey.encodeContract(addr.contractId() as any);
+      }
 
-      case StellarSdk.xdr.ScValType.scvVec():
+      case StellarSdk.xdr.ScValType.scvVec(): {
         const vec = scVal.vec();
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
         return vec ? vec.map((v) => this.decodeScVal(v)) : [];
+      }
 
-      case StellarSdk.xdr.ScValType.scvMap():
+      case StellarSdk.xdr.ScValType.scvMap(): {
         const map: Record<string, any> = {};
         const entries = scVal.map();
         if (entries) {
           for (const entry of entries) {
-            const key = this.decodeScVal(entry.key());
+            const key = this.decodeScVal(entry.key()) as string;
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             const value = this.decodeScVal(entry.val());
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             map[key] = value;
           }
         }
         return map;
+      }
 
       case StellarSdk.xdr.ScValType.scvBool():
         return scVal.b();
