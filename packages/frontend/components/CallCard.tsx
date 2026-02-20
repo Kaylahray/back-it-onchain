@@ -1,9 +1,13 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { TrendingUp, Clock, ShieldCheck, MessageSquare } from "lucide-react";
 
 interface CallCardProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   call: any;
+  onQuickStake?: (call: any) => void;
 }
 
 const CHAIN_CONFIG = {
@@ -52,9 +56,34 @@ export function CallCard({ call }: CallCardProps) {
     call.creatorWallet || call.creator?.wallet,
   );
 
+  // Countdown state
+  const [timeRemaining, setTimeRemaining] = useState<string>("");
+
+  useEffect(() => {
+    function compute() {
+      const now = Date.now();
+      const end = new Date(call.endTs).getTime();
+      const diff = Math.max(0, end - now);
+      if (diff === 0) return setTimeRemaining("Ended");
+      const mins = Math.floor(diff / 60000);
+      if (mins < 60) return setTimeRemaining(`Ends in ${mins}m`);
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return setTimeRemaining(`Ends in ${hrs}h`);
+      const days = Math.floor(hrs / 24);
+      return setTimeRemaining(`Ends in ${days}d`);
+    }
+    compute();
+    const t = setInterval(compute, 1000 * 30);
+    return () => clearInterval(t);
+  }, [call.endTs]);
+
+  // Determine "hot" markets by simple heuristic: large pool
+  const pool = (parseFloat(call.totalStakeYes || 0) || 0) + (parseFloat(call.totalStakeNo || 0) || 0);
+  const isHot = pool >= 100; // threshold for pulse animation
+
   return (
     <Link href={`/calls/${call.id}`} className="block group">
-      <div className="bg-card border border-border rounded-xl p-5 hover:border-primary/50 transition-all hover:shadow-lg hover:shadow-primary/5">
+      <div className={`bg-card border border-border rounded-xl p-5 hover:border-primary/50 transition-all hover:shadow-lg hover:shadow-primary/5 ${isHot ? 'ring-2 ring-red-400/20 animate-pulse' : ''}`}>
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">
             <div
@@ -92,7 +121,7 @@ export function CallCard({ call }: CallCardProps) {
           />
           <Badge
             icon={<Clock className="h-3 w-3" />}
-            label={new Date(call.endTs).toLocaleDateString()}
+            label={timeRemaining}
           />
           <Badge
             icon={<ShieldCheck className="h-3 w-3" />}
@@ -100,7 +129,7 @@ export function CallCard({ call }: CallCardProps) {
           />
         </div>
 
-        <div className="flex items-center justify-between pt-4 border-t border-border">
+        <div className="flex items-center justify-between pt-4 border-t border-border relative">
           <div className="flex gap-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1">
               <span className="font-bold text-green-500">
@@ -129,6 +158,21 @@ export function CallCard({ call }: CallCardProps) {
               <MessageSquare className="h-3 w-3" />
               {call.comments || 0} Comments
             </div>
+          </div>
+          {/* Quick Stake visible on hover */}
+          <div className="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // trigger a custom event so parent can open modal if provided
+                const ev = new CustomEvent('quick-stake', { detail: call });
+                window.dispatchEvent(ev);
+              }}
+              className="px-3 py-1 rounded-md bg-primary text-white text-sm shadow-sm hover:brightness-95"
+            >
+              Quick Stake
+            </button>
           </div>
         </div>
       </div>
