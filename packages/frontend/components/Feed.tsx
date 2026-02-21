@@ -1,7 +1,9 @@
-'use client';
+"use client";
 
 import { useState, useEffect } from 'react';
 import { CallCard } from './CallCard';
+import StakingModal from './StakingModal';
+import RecommendedUsers from './RecommendedUsers';
 
 type ChainFilter = 'all' | 'base' | 'stellar';
 
@@ -27,6 +29,9 @@ interface Call {
 export function Feed() {
     const [calls, setCalls] = useState<Call[]>([]);
     const [chainFilter, setChainFilter] = useState<ChainFilter>('all');
+    const [tab, setTab] = useState<'for-you' | 'following' | 'newest'>('for-you');
+    const [selectedCall, setSelectedCall] = useState<Call | null>(null);
+    const [showModal, setShowModal] = useState(false);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -98,8 +103,24 @@ export function Feed() {
         fetchCalls();
     }, [chainFilter]);
 
+    useEffect(() => {
+        function handler(e: any) {
+            setSelectedCall(e.detail);
+            setShowModal(true);
+        }
+        window.addEventListener('quick-stake', handler as EventListener);
+        return () => window.removeEventListener('quick-stake', handler as EventListener);
+    }, []);
+
     return (
         <div className="space-y-4">
+            {/* Tabs */}
+            <div className="flex gap-2 mb-4">
+                <button onClick={() => setTab('for-you')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === 'for-you' ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-secondary/80'}`}>For You</button>
+                <button onClick={() => setTab('following')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === 'following' ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-secondary/80'}`}>Following</button>
+                <button onClick={() => setTab('newest')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === 'newest' ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-secondary/80'}`}>Newest</button>
+            </div>
+
             {/* Chain Filter Buttons */}
             <div className="flex gap-2 mb-4">
                 <button
@@ -147,9 +168,27 @@ export function Feed() {
                 </div>
             )}
 
-            {!loading && calls.map((call) => (
-                <CallCard key={call.id} call={call} />
-            ))}
+            {!loading && (() => {
+                let list = calls.slice();
+                if (tab === 'following') {
+                    list = list.filter(c => c.creator?.isFollowing);
+                } else if (tab === 'newest') {
+                    list = list.sort((a,b) => (new Date(b.createdAt || '').getTime() || 0) - (new Date(a.createdAt || '').getTime() || 0));
+                } else {
+                    // for-you: simple algorithmic sort: prioritize base chain
+                    list = list.sort((a,b) => (a.chain === 'base' ? -1 : 1));
+                }
+
+                if (tab === 'following' && list.length === 0) {
+                    return <RecommendedUsers />;
+                }
+
+                return list.map((call) => (
+                    <CallCard key={call.id} call={call} />
+                ));
+            })()}
+
+            <StakingModal open={showModal} call={selectedCall} onClose={() => setShowModal(false)} />
         </div>
     );
 }
