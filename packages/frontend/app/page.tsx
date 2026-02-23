@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, TrendingUp, ShieldCheck, Users } from "lucide-react";
+import { TrendingUp, ShieldCheck, Users } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ChainSelector } from "@/components/ChainSelector";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
@@ -52,8 +52,8 @@ export default function LandingPage() {
             </div>
 
             <div className="flex items-center justify-center">
-              <div className="w-full sm:w-auto">
-                <WalletConnectButton className="w-full px-8 py-4 bg-primary hover:bg-primary/95 text-primary-foreground rounded-xl font-semibold text-lg transition-transform transform hover:-translate-y-0.5 shadow-xl" />
+              <div className="w-full sm:w-auto [&>button]:w-full [&>button]:px-8 [&>button]:py-4 [&>button]:rounded-xl [&>button]:font-semibold [&>button]:text-lg [&>button]:shadow-xl [&>button]:transition-transform [&>button]:hover:-translate-y-0.5">
+                <WalletConnectButton />
               </div>
             </div>
           </div>
