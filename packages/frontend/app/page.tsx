@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, TrendingUp, ShieldCheck, Users } from "lucide-react";
+import { TrendingUp, ShieldCheck, Users } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ChainSelector } from "@/components/ChainSelector";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+import MarketTicker from "@/components/MarketTicker";
 
 export default function LandingPage() {
   return (
@@ -36,31 +37,24 @@ export default function LandingPage() {
               </span>
             </div>
 
-            <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60">
-              Put Your Stake <br />
-              Where Your Mouth Is
+            <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight mb-4 leading-tight">
+              Predict the Future.
+              <br />
+              Back It Onchain.
             </h1>
 
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
-              BackIT is the onchain prediction marketplace where reputation is
-              earned, not claimed. Make calls, stake tokens, and prove your
-              alpha.
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-6">
+              The social prediction layer for Stellar and Base.
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link
-                href="/onboarding"
-                className="w-full sm:w-auto px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-semibold text-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/25"
-              >
-                Start Backing
-                <ArrowRight className="h-5 w-5" />
-              </Link>
-              <Link
-                href="/feed"
-                className="w-full sm:w-auto px-8 py-4 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-xl font-semibold text-lg transition-all border border-border"
-              >
-                View Market
-              </Link>
+            <div className="mb-8">
+              <MarketTicker />
+            </div>
+
+            <div className="flex items-center justify-center">
+              <div className="w-full sm:w-auto [&>button]:w-full [&>button]:px-8 [&>button]:py-4 [&>button]:rounded-xl [&>button]:font-semibold [&>button]:text-lg [&>button]:shadow-xl [&>button]:transition-transform [&>button]:hover:-translate-y-0.5">
+                <WalletConnectButton />
+              </div>
             </div>
           </div>
         </section>
@@ -71,18 +65,18 @@ export default function LandingPage() {
             <div className="grid md:grid-cols-3 gap-8">
               <FeatureCard
                 icon={<TrendingUp className="h-8 w-8 text-primary" />}
-                title="Market Predictions"
-                description="Create calls on any asset with specific price targets and timeframes. Your prediction is immutable onchain."
+                title="Create Calls"
+                description="Predict price movement by creating calls with target prices and timeframes."
               />
               <FeatureCard
                 icon={<ShieldCheck className="h-8 w-8 text-accent" />}
-                title="Skin in the Game"
-                description="Back your calls with real value. Stakes are locked in smart contracts until the outcome is determined."
+                title="Stake Reputation"
+                description="Back other users' calls to build reputation and signal conviction."
               />
               <FeatureCard
                 icon={<Users className="h-8 w-8 text-blue-500" />}
-                title="Social Consensus"
-                description="Join call groups, discuss thesis, and build your reputation score based on successful predictions."
+                title="Earn Rewards"
+                description="Win rewards when your predictions are correct — reputation and payouts."
               />
             </div>
           </div>
