@@ -36,13 +36,7 @@ fn test_create_call() {
         ipfs_cid: ipfs_cid.clone(),
     };
 
-    let call_id = client.create_call(
-        &creator,
-        &stake_token,
-        &100,
-        &end_ts,
-        &metadata,
-    );
+    let call_id = client.create_call(&creator, &stake_token, &100, &end_ts, &metadata);
 
     assert_eq!(call_id, 0);
 
@@ -101,13 +95,7 @@ fn test_stake_on_call() {
         ipfs_cid: ipfs_cid.clone(),
     };
 
-    let call_id = client.create_call(
-        &creator,
-        &stake_token,
-        &100,
-        &end_ts,
-        &metadata,
-    );
+    let call_id = client.create_call(&creator, &stake_token, &100, &end_ts, &metadata);
 
     // Stake NO
     client.stake_on_call(&call_id, &staker, &50, &false);
@@ -147,13 +135,7 @@ fn test_create_call_past_end_time() {
         ipfs_cid,
     };
 
-    client.create_call(
-        &creator,
-        &stake_token,
-        &100,
-        &end_ts,
-        &metadata,
-    );
+    client.create_call(&creator, &stake_token, &100, &end_ts, &metadata);
 }
 
 #[test]
@@ -188,13 +170,7 @@ fn test_stake_ended_call() {
         ipfs_cid,
     };
 
-    let call_id = client.create_call(
-        &creator,
-        &stake_token,
-        &100,
-        &end_ts,
-        &metadata,
-    );
+    let call_id = client.create_call(&creator, &stake_token, &100, &end_ts, &metadata);
 
     // Fast forward time
     env.ledger().set_timestamp(end_ts + 1);
@@ -233,13 +209,7 @@ fn test_create_call_paused() {
         ipfs_cid,
     };
 
-    client.create_call(
-        &creator,
-        &stake_token,
-        &100,
-        &end_ts,
-        &metadata,
-    );
+    client.create_call(&creator, &stake_token, &100, &end_ts, &metadata);
 }
 
 #[test]
@@ -274,13 +244,7 @@ fn test_pause_unpause_flow() {
         ipfs_cid,
     };
 
-    let call_id = client.create_call(
-        &creator,
-        &stake_token,
-        &100,
-        &end_ts,
-        &metadata,
-    );
+    let call_id = client.create_call(&creator, &stake_token, &100, &end_ts, &metadata);
 
     client.pause();
     assert!(client.get_is_paused());
