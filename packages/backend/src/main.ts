@@ -5,7 +5,10 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody is required so the indexer webhook route can verify the
+  // HMAC-SHA256 X-Signature header against the exact bytes that were sent,
+  // rather than a re-serialized (and potentially non-identical) JSON body.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const allowedOrigins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',').map((origin) => origin.trim())
     : ['http://localhost:3000', 'http://127.0.0.1:3000'];

@@ -33,6 +33,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { AdminModule } from './admin/admin.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -123,6 +124,7 @@ import { AdminModule } from './admin/admin.module';
     UploadsModule,
     GatewaysModule,
     AdminModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [
