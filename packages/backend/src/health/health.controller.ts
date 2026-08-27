@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import {
   DiskHealthIndicator,
@@ -29,6 +30,7 @@ const MEMORY_HEAP_THRESHOLD_BYTES = 300 * 1024 * 1024; // 300MB
 const DISK_THRESHOLD_PERCENT = 0.9; // fail if >90% of the volume is used
 
 @Controller('health')
+@SkipThrottle()
 export class HealthController {
   constructor(
     private readonly configService: ConfigService,
