@@ -23,19 +23,18 @@ export class ReputationScoreSnippet {
   ) {}
 
   async computeAndPersistReputation(userId: string): Promise<number> {
-    const [totalResolvedCalls, winCount] = await Promise.all([
-      this.callRepo.count({
-        where: { creatorWallet: userId, status: 'resolved' },
-      }),
-      this.callRepo.count({
-        where: { creatorWallet: userId, status: 'resolved', outcome: true },
-      }),
-    ]);
-
-    const reputationScore = computeReputationScore({
-      totalResolvedCalls,
-      winCount,
+    const resolvedCalls = await this.callRepo.find({
+      where: { creatorWallet: userId, status: 'resolved' },
+      select: ['outcome', 'totalStakeYes', 'totalStakeNo', 'endTs'],
     });
+
+    const reputationScore = computeReputationScore(
+      resolvedCalls.map((c) => ({
+        outcome: c.outcome ?? null,
+        stakeAmount: (c.totalStakeYes ?? 0) + (c.totalStakeNo ?? 0),
+        resolvedAt: c.endTs,
+      })),
+    );
 
     await this.userRepo.update({ wallet: userId }, { reputationScore });
 
