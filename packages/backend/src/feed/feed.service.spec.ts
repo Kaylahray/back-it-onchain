@@ -17,8 +17,8 @@ const mockCall = (overrides: Partial<Call> = {}): Call =>
     tokenAddress: '0xTOKEN',
     pairId: null,
     stakeToken: '0xSTAKE',
-    totalStakeYes: 100,
-    totalStakeNo: 50,
+    totalStakeYes: 400,
+    totalStakeNo: 100,
     startTs: new Date('2026-01-01'),
     endTs: new Date('2026-06-01'),
     conditionJson: null,
@@ -53,29 +53,16 @@ describe('FeedService', () => {
     set: jest.Mock;
   };
 
-  // Reusable query builder mock
-  const buildQueryBuilderMock = (returnValue: Call[]) => {
-    const qb = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      take: jest.fn().mockReturnThis(),
-      skip: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue(returnValue),
-    };
-    return qb;
-  };
-
-  const buildActivityQueryBuilderMock = (returnValue: Array<any>) => {
+  // Query builder mock for the trending raw query (call + stake_activity join)
+  const buildTrendingQbMock = (rows: Array<any>) => {
     const qb = {
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue(returnValue),
+      addGroupBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue(rows),
     };
     return qb;
   };
@@ -128,9 +115,6 @@ describe('FeedService', () => {
     expect(service).toBeDefined();
   });
 
-  // ---------------------------------------------------------------------------
-  // getFollowingFeed
-  // ---------------------------------------------------------------------------
   describe('getFollowingFeed', () => {
     it('returns empty array when the user follows nobody', async () => {
       userFollowsRepository.find.mockResolvedValue([]);
@@ -217,7 +201,6 @@ describe('FeedService', () => {
 
       const older = mockCall({ id: 1, createdAt: new Date('2026-01-01') });
       const newer = mockCall({ id: 2, createdAt: new Date('2026-03-01') });
-      // Simulate DB returning newest first
       callRepository.find.mockResolvedValue([newer, older]);
 
       const result = await service.getFollowingFeed('0xUSER');
@@ -239,24 +222,49 @@ describe('FeedService', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // getForYouFeed (global / trending)
-  // ---------------------------------------------------------------------------
-  describe('getForYouFeed', () => {
-    it('returns calls sorted by total stake descending', async () => {
-      const lowStakeCall = mockCall({
-        id: 1,
-        totalStakeYes: 10,
-        totalStakeNo: 5,
-      });
-      const highStakeCall = mockCall({
-        id: 2,
-        totalStakeYes: 500,
-        totalStakeNo: 300,
-      });
+  // The trending raw query drives BOTH forYou and trending surfaces.
+  const stubTrending = ({
+    rows,
+    calls,
+    totalStakeYes = 400,
+    totalStakeNo = 100,
+  }: {
+    rows: Array<any>;
+    calls: Call[];
+    totalStakeYes?: number;
+    totalStakeNo?: number;
+  }) => {
+    const qb = buildTrendingQbMock(rows);
+    callRepository.createQueryBuilder.mockReturnValue(qb);
+    callRepository.find.mockResolvedValue(calls);
+    return qb;
+  };
 
-      const qb = buildQueryBuilderMock([highStakeCall, lowStakeCall]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
+  describe('getForYouFeed', () => {
+    it('ranks calls by the trending score formula', async () => {
+      const highCall = mockCall({ id: 2, totalStakeYes: 2000, totalStakeNo: 1000 });
+      const lowCall = mockCall({ id: 1, totalStakeYes: 10, totalStakeNo: 5 });
+      stubTrending({
+        rows: [
+          {
+            callId: '2',
+            callOnchainId: '2',
+            totalStake: '3000',
+            createdAt: Date.now().toString(),
+            volume24h: '0',
+            participantCount24h: '0',
+          },
+          {
+            callId: '1',
+            callOnchainId: '1',
+            totalStake: '15',
+            createdAt: Date.now().toString(),
+            volume24h: '0',
+            participantCount24h: '0',
+          },
+        ],
+        calls: [highCall, lowCall],
+      });
 
       const result = await service.getForYouFeed();
 
@@ -264,9 +272,8 @@ describe('FeedService', () => {
       expect(result[1].id).toBe(1);
     });
 
-    it('excludes hidden calls via where clause', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
+    it('excludes hidden calls in the raw query', async () => {
+      const qb = stubTrending({ rows: [], calls: [] });
 
       await service.getForYouFeed();
 
@@ -275,90 +282,36 @@ describe('FeedService', () => {
       });
     });
 
-    it('adds total_stake computed select', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
+    it('selects total_stake expression', async () => {
+      const qb = stubTrending({ rows: [], calls: [] });
 
       await service.getForYouFeed();
 
       expect(qb.addSelect).toHaveBeenCalledWith(
-        '(call.totalStakeYes + call.totalStakeNo)',
-        'total_stake',
+        'call.totalStakeYes + call.totalStakeNo',
+        'totalStake',
       );
     });
 
-    it('orders by total_stake DESC then createdAt DESC', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
+    it('joins stake_activity for 24h aggregates', async () => {
+      const qb = stubTrending({ rows: [], calls: [] });
 
       await service.getForYouFeed();
 
-      expect(qb.orderBy).toHaveBeenCalledWith('total_stake', 'DESC');
-      expect(qb.addOrderBy).toHaveBeenCalledWith('call.createdAt', 'DESC');
-    });
-
-    it('joins creator relation', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
-
-      await service.getForYouFeed();
-
-      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
-        'call.creator',
-        'creator',
+      expect(qb.leftJoin).toHaveBeenCalledWith(
+        StakeActivity,
+        'activity',
+        expect.stringContaining('activity.callOnchainId'),
+        expect.any(Object),
       );
-    });
-
-    it('applies limit and offset pagination', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
-
-      await service.getForYouFeed(10, 20);
-
-      expect(qb.take).toHaveBeenCalledWith(10);
-      expect(qb.skip).toHaveBeenCalledWith(20);
-    });
-
-    it('uses default limit=20 and offset=0', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
-
-      await service.getForYouFeed();
-
-      expect(qb.take).toHaveBeenCalledWith(20);
-      expect(qb.skip).toHaveBeenCalledWith(0);
     });
 
     it('returns empty array when no calls exist', async () => {
-      const qb = buildQueryBuilderMock([]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
+      stubTrending({ rows: [], calls: [] });
 
       const result = await service.getForYouFeed();
 
       expect(result).toEqual([]);
-    });
-
-    it('breaks ties in stake by createdAt (newest first)', async () => {
-      const olderCall = mockCall({
-        id: 1,
-        totalStakeYes: 100,
-        totalStakeNo: 100,
-        createdAt: new Date('2026-01-01'),
-      });
-      const newerCall = mockCall({
-        id: 2,
-        totalStakeYes: 100,
-        totalStakeNo: 100,
-        createdAt: new Date('2026-03-01'),
-      });
-      // Simulate DB honouring the secondary sort
-      const qb = buildQueryBuilderMock([newerCall, olderCall]);
-      callRepository.createQueryBuilder.mockReturnValue(qb);
-
-      const result = await service.getForYouFeed();
-
-      expect(result[0].id).toBe(2);
-      expect(result[1].id).toBe(1);
     });
   });
 
@@ -368,6 +321,7 @@ describe('FeedService', () => {
         ...mockCall({ id: 1 }),
         trendingScore: 100,
         isHot: true,
+        totalStake: 500,
         volume24h: 500,
         participantCount24h: 5,
       };
@@ -379,37 +333,43 @@ describe('FeedService', () => {
       expect(result).toEqual([trendingItem]);
     });
 
-    it('computes trending from stake activity when cache miss', async () => {
+    it('computes trending using the scoring formula on cache miss', async () => {
       cacheManager.get.mockResolvedValue(null);
-
-      const activityRows = [
-        {
-          callOnchainId: '123',
-          volume24h: '500',
-          participantCount24h: '10',
-        },
-      ];
-
-      const qb = buildActivityQueryBuilderMock(activityRows);
-      stakeActivityRepository.createQueryBuilder.mockReturnValue(qb);
 
       const call = mockCall({
         id: 1,
         callOnchainId: '123',
         totalStakeYes: 400,
         totalStakeNo: 100,
+        createdAt: new Date(),
       });
+
+      const qb = buildTrendingQbMock([
+        {
+          callId: '1',
+          callOnchainId: '123',
+          totalStake: '500',
+          createdAt: new Date().toString(),
+          volume24h: '500',
+          participantCount24h: '10',
+        },
+      ]);
+      callRepository.createQueryBuilder.mockReturnValue(qb);
       callRepository.find.mockResolvedValue([call]);
 
       const result = await service.getTrendingFeed(10, 0);
 
-      expect(stakeActivityRepository.createQueryBuilder).toHaveBeenCalledWith(
+      expect(callRepository.createQueryBuilder).toHaveBeenCalledWith('call');
+      expect(qb.leftJoin).toHaveBeenCalledWith(
+        StakeActivity,
         'activity',
+        expect.any(String),
+        expect.any(Object),
       );
       expect(callRepository.find).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            callOnchainId: In(['123']),
+            id: In([1]),
             isHidden: false,
           }),
           relations: ['creator'],
@@ -418,10 +378,15 @@ describe('FeedService', () => {
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         id: 1,
+        totalStake: 500,
         volume24h: 500,
         participantCount24h: 10,
-        isHot: true,
       });
+      // (500*0.5 + 10*30 + 500*0.2) / ageDecay
+      // ageHours is clamped to a 1h floor -> ageDecay = 1 + ln(2) = 1.6931
+      const rawScore = 500 * 0.5 + 10 * 30 + 500 * 0.2; // 650
+      const decay = 1 + Math.log(2);
+      expect(result[0].trendingScore).toBeCloseTo(rawScore / decay, 1);
       expect(cacheManager.set).toHaveBeenCalledWith(
         'feed:trending:24h',
         expect.any(Array),

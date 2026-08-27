@@ -57,7 +57,7 @@ import { AdminModule } from './admin/admin.module';
       },
       inject: [ConfigService],
     }),
-    EventEmitterModule.forRoot(),
+    EventEmitterModule.forRoot({ wildcard: true }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
