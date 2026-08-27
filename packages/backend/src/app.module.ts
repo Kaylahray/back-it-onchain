@@ -31,6 +31,8 @@ import { BadgesModule } from './badges/badges.module';
 import { UserBadge } from './badges/badge.entity';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { DatabaseStartupValidator } from './common/database/database-startup.validator';
+import { AuditLog } from './oracle/audit-log.entity';
 import { GatewaysModule } from './gateways/gateways.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
@@ -80,6 +82,7 @@ import { HealthModule } from './health/health.module';
           Notification,
           PlatformSettings,
           UserBadge,
+          AuditLog,
         ],
 
         synchronize: true,
@@ -129,6 +132,7 @@ import { HealthModule } from './health/health.module';
   controllers: [AppController],
   providers: [
     AppService,
+    DatabaseStartupValidator,
     {
       provide: APP_GUARD,
       useClass: CustomThrottlerGuard,
