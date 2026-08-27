@@ -9,6 +9,7 @@ import { AppService } from './app.service';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
+import { RedisThrottlerStorage } from './common/guards/redis-throttler.storage';
 import { validationSchema } from './config/env.validation';
 
 import { User } from './users/user.entity';
@@ -85,18 +86,30 @@ import { AdminModule } from './admin/admin.module';
       inject: [ConfigService],
     }),
     TypeOrmModule.forFeature([User, Call]),
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        ttl: 60000,
-        limit: 100,
-      },
-      {
-        name: 'short',
-        ttl: 60000,
-        limit: 5,
-      },
-    ]),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        storage: new RedisThrottlerStorage(configService.get<string>('REDIS_URL')),
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60000,
+            limit: 60,
+          },
+          {
+            name: 'short',
+            ttl: 60000,
+            limit: 5,
+          },
+          {
+            name: 'wallet',
+            ttl: 60000,
+            limit: 10,
+          },
+        ],
+      }),
+    }),
     AuthModule,
     CallsModule,
     OracleModule,

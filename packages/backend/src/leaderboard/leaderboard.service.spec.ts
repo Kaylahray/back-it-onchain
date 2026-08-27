@@ -18,6 +18,8 @@ const mockEntry = (overrides: Partial<Leaderboard> = {}): Leaderboard =>
     userId: '0xUSER',
     winRate: 75.0,
     profit: 500,
+    stakeVolume: 1000,
+    reputationScore: 120,
     totalPredictions: 20,
     ...overrides,
   }) as Leaderboard;
@@ -29,6 +31,8 @@ const mockAggRow = (overrides: Record<string, string> = {}) => ({
   win_count: '7',
   win_rate: '70.00',
   profit: '300.00',
+  stake_volume: '500.00',
+  reputation_score: '100',
   ...overrides,
 });
 
@@ -207,23 +211,25 @@ describe('LeaderboardAggregationJob', () => {
   // aggregateAll
   // -------------------------------------------------------------------------
   describe('aggregateAll', () => {
-    it('aggregates both ALL_TIME and WEEKLY periods', async () => {
+    it('aggregates all periods', async () => {
       dataSource.query.mockResolvedValue([]); // empty → skip
       await job.aggregateAll();
-      // Two periods × one query each
-      expect(dataSource.query).toHaveBeenCalledTimes(2);
+      // All periods × one query each
+      expect(dataSource.query).toHaveBeenCalledTimes(3);
     });
 
-    it('runs both periods concurrently (Promise.all)', async () => {
+    it('runs all periods concurrently (Promise.all)', async () => {
       const order: string[] = [];
       dataSource.query.mockImplementation(async (sql: string) => {
-        order.push(sql.includes(`'7 days'`) ? 'weekly' : 'all_time');
+        if (sql.includes(`'7 days'`)) order.push('weekly');
+        else if (sql.includes(`'30 days'`)) order.push('monthly');
+        else order.push('all_time');
         return [];
       });
 
       await job.aggregateAll();
 
-      expect(order).toEqual(expect.arrayContaining(['weekly', 'all_time']));
+      expect(order).toEqual(expect.arrayContaining(['weekly', 'monthly', 'all_time']));
     });
   });
 
@@ -251,7 +257,7 @@ describe('LeaderboardAggregationJob', () => {
           mockAggRow({ user_id: '0xALICE', win_rate: '90.00', profit: '1000' }),
           mockAggRow({ user_id: '0xBOB', win_rate: '60.00', profit: '200' }),
         ])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
       await job.aggregateAll();
 
@@ -285,7 +291,7 @@ describe('LeaderboardAggregationJob', () => {
                   profit: '200',
                 }),
               ])
-              .mockResolvedValueOnce([]);
+              .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
             await job.aggregateAll();
             return captured;
           })()
@@ -305,7 +311,7 @@ describe('LeaderboardAggregationJob', () => {
       let capturedEntries: Leaderboard[] = [];
       dataSource.query
         .mockResolvedValueOnce(rows) // ALL_TIME
-        .mockResolvedValueOnce([]); // WEEKLY
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]); // WEEKLY, MONTHLY
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {
@@ -331,7 +337,7 @@ describe('LeaderboardAggregationJob', () => {
       let capturedEntries: Leaderboard[] = [];
       dataSource.query
         .mockResolvedValueOnce([mockAggRow({ user_id: '0xALICE' })])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {
@@ -369,7 +375,7 @@ describe('LeaderboardAggregationJob', () => {
             total_predictions: '15',
           }),
         ])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {
@@ -410,19 +416,22 @@ describe('LeaderboardAggregationJob', () => {
   // Win-rate ordering (SQL contract)
   // -------------------------------------------------------------------------
   describe('win-rate and profit ordering (SQL contract)', () => {
-    it('SQL for ALL_TIME includes ORDER BY win_rate DESC, profit DESC', async () => {
+    it('SQL for ALL_TIME includes the ranking ORDER BY', async () => {
       dataSource.query.mockResolvedValue([]);
       await job.aggregateAll();
 
       const allTimeSql: string =
         dataSource.query.mock.calls.find(
-          ([sql]: [string]) => !sql.includes(`'7 days'`),
+          ([sql]: [string]) =>
+            !sql.includes(`'7 days'`) && !sql.includes(`'30 days'`),
         )?.[0] ?? '';
 
-      expect(allTimeSql).toMatch(/ORDER BY win_rate DESC,\s*profit DESC/i);
+      expect(allTimeSql).toMatch(
+        /ORDER BY\s+reputation_score DESC,\s*stake_volume DESC,\s*win_rate DESC,\s*profit DESC/i,
+      );
     });
 
-    it('SQL for WEEKLY includes ORDER BY win_rate DESC, profit DESC', async () => {
+    it('SQL for WEEKLY includes the ranking ORDER BY', async () => {
       dataSource.query.mockResolvedValue([]);
       await job.aggregateAll();
 
@@ -431,7 +440,9 @@ describe('LeaderboardAggregationJob', () => {
           sql.includes(`'7 days'`),
         )?.[0] ?? '';
 
-      expect(weeklySql).toMatch(/ORDER BY win_rate DESC,\s*profit DESC/i);
+      expect(weeklySql).toMatch(
+        /ORDER BY\s+reputation_score DESC,\s*stake_volume DESC,\s*win_rate DESC,\s*profit DESC/i,
+      );
     });
 
     it('higher win_rate row receives a lower (better) rank', async () => {
@@ -443,7 +454,7 @@ describe('LeaderboardAggregationJob', () => {
           mockAggRow({ user_id: '0xMIDDLE', win_rate: '60.00', profit: '800' }),
           mockAggRow({ user_id: '0xBOTTOM', win_rate: '20.00', profit: '100' }),
         ])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {
@@ -476,7 +487,7 @@ describe('LeaderboardAggregationJob', () => {
           mockAggRow({ user_id: '0xRICH', win_rate: '50.00', profit: '9999' }),
           mockAggRow({ user_id: '0xPOOR', win_rate: '50.00', profit: '1' }),
         ])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {
@@ -522,10 +533,24 @@ describe('LeaderboardAggregationJob', () => {
 
       const allTimeSql: string =
         dataSource.query.mock.calls.find(
-          ([sql]: [string]) => !sql.includes(`'7 days'`),
+          ([sql]: [string]) =>
+            !sql.includes(`'7 days'`) && !sql.includes(`'30 days'`),
         )?.[0] ?? '';
 
       expect(allTimeSql).not.toContain('7 days');
+      expect(allTimeSql).not.toContain('30 days');
+    });
+
+    it('MONTHLY query includes a 30-day recency filter', async () => {
+      dataSource.query.mockResolvedValue([]);
+      await job.aggregateAll();
+
+      const monthlySql: string =
+        dataSource.query.mock.calls.find(([sql]: [string]) =>
+          sql.includes(`'30 days'`),
+        )?.[0] ?? '';
+
+      expect(monthlySql).toContain(`'30 days'`);
     });
 
     it('WEEKLY query filters only resolved calls within the last 7 days', async () => {
@@ -563,7 +588,7 @@ describe('LeaderboardAggregationJob', () => {
 
       dataSource.query
         .mockResolvedValueOnce([mockAggRow()])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {
@@ -591,7 +616,7 @@ describe('LeaderboardAggregationJob', () => {
       let deletedWith: any;
       dataSource.query
         .mockResolvedValueOnce([mockAggRow()])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       dataSource.transaction.mockImplementation(
         async (cb: (manager: any) => Promise<void>) => {
           const manager = {

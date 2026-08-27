@@ -23,7 +23,7 @@ export class CallsController {
     private readonly adminService: AdminService,
   ) {}
 
-  @Throttle({ short: { limit: 5, ttl: 1 * 60000 } })
+  @Throttle({ wallet: { limit: 10, ttl: 1 * 60000 } })
   @Post()
   create(@Body() createCallDto: Partial<Call>) {
     if (this.adminService.isPaused()) {

@@ -3,6 +3,7 @@ import { TerminusModule } from '@nestjs/terminus';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   HealthCheck,
   HealthCheckService,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/terminus';
 
 @Controller('health')
+@SkipThrottle()
 class HealthController {
   constructor(
     private readonly health: HealthCheckService,
