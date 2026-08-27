@@ -13,7 +13,9 @@ import { validationSchema } from './config/env.validation';
 
 import { User } from './users/user.entity';
 import { Call } from './calls/call.entity';
+import { Participant } from './calls/participant.entity';
 import { StakeActivity } from './calls/stake-activity.entity';
+import { Dispute } from './calls/dispute.entity';
 import { AuthModule } from './auth/auth.module';
 import { CallsModule } from './calls/calls.module';
 import { OracleModule } from './oracle/oracle.module';
@@ -73,7 +75,9 @@ import { HealthModule } from './health/health.module';
         entities: [
           User,
           Call,
+          Participant,
           StakeActivity,
+          Dispute,
           UserFollows,
           UserSettings,
           Notification,

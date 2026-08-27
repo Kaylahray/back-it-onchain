@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
@@ -11,8 +12,10 @@ export class MaintenanceService {
   constructor(
     @InjectRepository(Call)
     private readonly callsRepository: Repository<Call>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /** Every 6 hours: move expired OPEN calls to SETTLING and emit outcome.proposed. */
   @Cron('0 */6 * * *')
   async handleStaleCallsCleanup(): Promise<void> {
     this.logger.log('Running stale call detection...');
@@ -21,7 +24,7 @@ export class MaintenanceService {
     cutoff.setHours(cutoff.getHours() - 48);
 
     const staleCalls = await this.callsRepository.find({
-      where: { status: 'OPEN', endTs: LessThan(cutoff) },
+      where: { status: 'OPEN', endTs: LessThan(cutoff), isHidden: false },
     });
 
     if (staleCalls.length === 0) {
@@ -30,13 +33,20 @@ export class MaintenanceService {
     }
 
     for (const call of staleCalls) {
-      call.status = 'STALE';
+      call.status = 'SETTLING';
       await this.callsRepository.save(call);
-      this.logger.warn(
-        `Call ${call.id} marked STALE — manual intervention required.`,
-      );
+      this.logger.warn(`Call ${call.id} transitioned OPEN → SETTLING by maintenance job.`);
+
+      this.eventEmitter.emit('outcome.proposed', {
+        marketId: String(call.callOnchainId ?? call.id),
+        callId: String(call.id),
+        submitter: 'maintenance',
+        resultCode: 0,
+        windowExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+        timestamp: Date.now(),
+      });
     }
 
-    this.logger.log(`Marked ${staleCalls.length} call(s) as STALE.`);
+    this.logger.log(`Transitioned ${staleCalls.length} call(s) to SETTLING.`);
   }
 }
