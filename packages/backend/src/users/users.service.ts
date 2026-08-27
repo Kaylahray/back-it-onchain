@@ -15,6 +15,9 @@ import { NotificationEventsService } from '../notifications/notification-events.
 
 export type ExportFormat = 'csv' | 'json';
 
+/** Hard cap on rows returned by a single export, to bound memory/response size. */
+export const MAX_EXPORT_ROWS = 10_000;
+
 /** One row in the exported history. */
 export interface HistoryRow {
   call_id: string;
@@ -282,6 +285,7 @@ export class UsersService {
       WHERE c.creator_wallet = $1
         AND c.is_hidden = false
       ORDER BY c.created_at DESC
+      LIMIT ${MAX_EXPORT_ROWS}
     `;
 
     // pg-level stream — yields one row object at a time
@@ -305,14 +309,29 @@ export class UsersService {
     queryRunner: import('typeorm').QueryRunner,
   ): Readable {
     let first = true;
-    const output = new Readable({ read() {} });
+
+    // `read()` resumes the paused pg source once the consumer has drained
+    // enough of `output`'s internal buffer — this is what makes the stream
+    // backpressure-safe instead of buffering the whole export in memory.
+    const output = new Readable({
+      read() {
+        pgStream.resume();
+      },
+    });
+
+    pgStream.pause();
 
     output.push('[\n');
 
     pgStream.on('data', (row: Record<string, unknown>) => {
       const prefix = first ? '  ' : ',\n  ';
       first = false;
-      output.push(prefix + JSON.stringify(row));
+      const canContinue = output.push(prefix + JSON.stringify(row));
+      if (!canContinue) {
+        // output's internal buffer is full — stop pulling rows from
+        // Postgres until `read()` above signals the consumer caught up.
+        pgStream.pause();
+      }
     });
 
     pgStream.on('end', () => {
