@@ -34,6 +34,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
+import { TokensModule } from './tokens/tokens.module';
 
 @Module({
   imports: [
@@ -125,6 +126,7 @@ import { HealthModule } from './health/health.module';
     GatewaysModule,
     AdminModule,
     HealthModule,
+    TokensModule,
   ],
   controllers: [AppController],
   providers: [

@@ -13,6 +13,7 @@ import {
   InMemoryLedgerCheckpointStore,
   LedgerCheckpointStore,
 } from './ledger-checkpoint.service';
+import { Retryable } from '../../decorators/retryable.decorator';
 
 export interface StellarIndexerConfig {
   rpcUrl: string;
@@ -209,15 +210,7 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     endLedger: number,
   ): Promise<void> {
     try {
-      const events = await this.sorobanRpc.getEvents({
-        startLedger,
-        filters: [
-          {
-            type: 'contract',
-            contractIds: [contractId],
-          },
-        ],
-      });
+      const events = await this.getEventsWithRetry(contractId, startLedger);
 
       if (!events.events || events.events.length === 0) {
         this.logger.debug(`No events found for contract ${contractId}`);
@@ -245,6 +238,26 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
         error,
       );
     }
+  }
+
+  /**
+   * Soroban RPC call extracted so it can be retried independently of the
+   * event-parsing/storage loop in fetchContractEvents (#307).
+   */
+  @Retryable({ maxAttempts: 4, operationName: 'StellarIndexer:getEvents' })
+  private async getEventsWithRetry(
+    contractId: string,
+    startLedger: number,
+  ): Promise<SorobanRpc.Api.GetEventsResponse> {
+    return this.sorobanRpc.getEvents({
+      startLedger,
+      filters: [
+        {
+          type: 'contract',
+          contractIds: [contractId],
+        },
+      ],
+    });
   }
 
   private parseEvent(
