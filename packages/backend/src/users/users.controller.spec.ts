@@ -119,6 +119,48 @@ describe('UsersController', () => {
     });
   });
 
+  describe('exportWalletHistory', () => {
+    const mockRes = () => {
+      const { PassThrough } = require('stream');
+      const res = new PassThrough() as any;
+      res.setHeader = jest.fn();
+      res.status = jest.fn().mockReturnValue(res);
+      res.json = jest.fn().mockReturnValue(res);
+      res.removeHeader = jest.fn();
+      res.headersSent = false;
+      return res;
+    };
+
+    it('streams the export and sets the expected headers', async () => {
+      const { Readable } = await import('stream');
+      const stream = Readable.from(['a,b\n1,2\n']);
+      mockUsersService.exportHistory.mockResolvedValue(stream);
+      const res = mockRes();
+
+      await controller.exportWalletHistory('GWALLET', 'csv', res);
+
+      expect(service.exportHistory).toHaveBeenCalledWith('GWALLET', 'csv');
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Content-Type',
+        'text/csv; charset=utf-8',
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Transfer-Encoding',
+        'chunked',
+      );
+    });
+
+    it('defaults an unrecognised format to csv', async () => {
+      const { Readable } = await import('stream');
+      mockUsersService.exportHistory.mockResolvedValue(Readable.from(['']));
+      const res = mockRes();
+
+      await controller.exportWalletHistory('GWALLET', 'xml', res);
+
+      expect(service.exportHistory).toHaveBeenCalledWith('GWALLET', 'csv');
+    });
+  });
+
   describe('getStakes', () => {
     it('should return user stakes successfully', async () => {
       const mockStakes = [

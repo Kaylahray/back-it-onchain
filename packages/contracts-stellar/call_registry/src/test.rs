@@ -67,6 +67,57 @@ fn test_create_call() {
 }
 
 #[test]
+#[should_panic]
+fn test_create_call_requires_creator_auth() {
+    // #314 — create_call must reject a call that isn't authorized by the
+    // declared creator, even if some other address's auth is mocked.
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.initialize(&admin);
+
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &1000);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "whitelist_token_admin",
+            args: (&stake_token,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.whitelist_token_admin(&stake_token);
+
+    // No auth mocked for `creator` at all — create_call must panic on
+    // `creator.require_auth()` before any state or token transfer happens.
+    let end_ts = env.ledger().timestamp() + 1000;
+    client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+}
+
+#[test]
 fn test_stake_on_call() {
     let env = Env::default();
     env.mock_all_auths();

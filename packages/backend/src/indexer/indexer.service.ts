@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +16,11 @@ import { Retryable } from '../decorators/retryable.decorator';
 import { PlatformSettings } from './platform-settings.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationEventsService } from '../notifications/notification-events.service';
+import { AuditLog } from '../oracle/audit-log.entity';
+import {
+  IndexerWebhookDto,
+  IndexerWebhookEventType,
+} from './dto/indexer-webhook.dto';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -47,6 +57,8 @@ export class IndexerService implements OnModuleInit {
     private stakeActivityRepository: Repository<StakeActivity>,
     @InjectRepository(PlatformSettings)
     private settingsRepository: Repository<PlatformSettings>,
+    @InjectRepository(AuditLog)
+    private auditLogRepository: Repository<AuditLog>,
     private authService: AuthService,
     private eventEmitter: EventEmitter2,
     private notificationEventsService: NotificationEventsService,
@@ -406,6 +418,137 @@ export class IndexerService implements OnModuleInit {
       } as PlatformSettings;
     }
     return settings;
+  }
+
+  // ─── Webhook ingestion (BE-32) ─────────────────────────────────────────────
+
+  /**
+   * Processes a signed webhook callback from an external indexer.
+   *
+   * Delegates to the same handlers used by the live ethers.js listener
+   * (`handleCallCreated`, `handleStakeAdded`, etc.), which already perform
+   * an idempotent upsert keyed by `callOnchainId` — reprocessing the same
+   * event (e.g. after a webhook retry) is a safe no-op. Every callback is
+   * recorded to the audit log regardless of outcome, and HmacSignatureGuard
+   * has already rejected replayed nonces before this method runs.
+   */
+  async processWebhookEvent(
+    dto: IndexerWebhookDto,
+  ): Promise<{ processed: boolean; eventType: IndexerWebhookEventType }> {
+    let targetResource: string | undefined;
+
+    try {
+      switch (dto.eventType) {
+        case IndexerWebhookEventType.CALL_CREATED: {
+          const callId = this.requireBigInt(dto.data, 'callId');
+          targetResource = callId.toString();
+          await this.handleCallCreated(
+            callId,
+            this.requireString(dto.data, 'creator'),
+            this.requireString(dto.data, 'stakeToken'),
+            this.requireBigInt(dto.data, 'stakeAmount'),
+            this.requireBigInt(dto.data, 'startTs'),
+            this.requireBigInt(dto.data, 'endTs'),
+            this.requireString(dto.data, 'tokenAddress'),
+            this.requireString(dto.data, 'pairId'),
+            this.requireString(dto.data, 'ipfsCID'),
+          );
+          break;
+        }
+        case IndexerWebhookEventType.STAKE_ADDED: {
+          const callId = this.requireBigInt(dto.data, 'callId');
+          targetResource = callId.toString();
+          await this.handleStakeAdded(
+            callId,
+            this.requireString(dto.data, 'staker'),
+            this.requireBoolean(dto.data, 'position'),
+            this.requireBigInt(dto.data, 'amount'),
+          );
+          break;
+        }
+        case IndexerWebhookEventType.CALL_RESOLVED: {
+          const callId = this.requireBigInt(dto.data, 'callId');
+          targetResource = callId.toString();
+          await this.handleCallResolved(
+            callId,
+            this.requireBoolean(dto.data, 'outcome'),
+            this.requireBigInt(dto.data, 'finalPrice'),
+          );
+          break;
+        }
+        case IndexerWebhookEventType.ADMIN_PARAMS_CHANGED: {
+          await this.handleAdminParamsChanged(
+            this.requireBigInt(dto.data, 'feePercent'),
+          );
+          break;
+        }
+      }
+
+      await this.recordWebhookAudit(dto, targetResource, true);
+      return { processed: true, eventType: dto.eventType };
+    } catch (err) {
+      await this.recordWebhookAudit(
+        dto,
+        targetResource,
+        false,
+        (err as Error).message,
+      );
+      throw err;
+    }
+  }
+
+  private async recordWebhookAudit(
+    dto: IndexerWebhookDto,
+    targetResource: string | undefined,
+    success: boolean,
+    errorMessage?: string,
+  ): Promise<void> {
+    const entry = this.auditLogRepository.create({
+      action: `indexer.webhook.${dto.eventType}`,
+      actor: 'external-indexer',
+      targetResource,
+      payload: { nonce: dto.nonce, data: dto.data, success, errorMessage },
+    });
+    await this.auditLogRepository.save(entry);
+  }
+
+  private requireString(data: Record<string, unknown>, key: string): string {
+    const value = data[key];
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new BadRequestException(
+        `Webhook payload field "${key}" must be a non-empty string`,
+      );
+    }
+    return value;
+  }
+
+  private requireBoolean(data: Record<string, unknown>, key: string): boolean {
+    const value = data[key];
+    if (typeof value !== 'boolean') {
+      throw new BadRequestException(
+        `Webhook payload field "${key}" must be a boolean`,
+      );
+    }
+    return value;
+  }
+
+  private requireBigInt(data: Record<string, unknown>, key: string): bigint {
+    const value = data[key];
+    if (
+      (typeof value !== 'string' && typeof value !== 'number') ||
+      value === ''
+    ) {
+      throw new BadRequestException(
+        `Webhook payload field "${key}" must be a numeric string`,
+      );
+    }
+    try {
+      return BigInt(value);
+    } catch {
+      throw new BadRequestException(
+        `Webhook payload field "${key}" is not a valid integer`,
+      );
+    }
   }
 
   // ─── IPFS fetching ─────────────────────────────────────────────────────────
