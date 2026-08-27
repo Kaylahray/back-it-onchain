@@ -2,10 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IndexerService } from './indexer.service';
-import { IndexerController } from './indexer.controller';
+import { IndexerController, IndexerWebhookController } from './indexer.controller';
 import { Call } from '../calls/call.entity';
 import { StakeActivity } from '../calls/stake-activity.entity';
 import { PlatformSettings } from './platform-settings.entity';
+import { AuditLog } from '../oracle/audit-log.entity';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -13,10 +14,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [
     ConfigModule,
     AuthModule,
-    TypeOrmModule.forFeature([Call, StakeActivity, PlatformSettings]),
+    TypeOrmModule.forFeature([Call, StakeActivity, PlatformSettings, AuditLog]),
     NotificationsModule,
   ],
   providers: [IndexerService],
-  controllers: [IndexerController],
+  controllers: [IndexerController, IndexerWebhookController],
 })
 export class IndexerModule {}

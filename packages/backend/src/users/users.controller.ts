@@ -47,30 +47,7 @@ export class UsersController {
     if (!wallet) {
       throw new BadRequestException('wallet query parameter is required');
     }
-
-    const fmt = (format === 'json' ? 'json' : 'csv') as ExportFormat;
-    const timestamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const filename = `history-${wallet.slice(0, 8)}-${timestamp}.${fmt}`;
-
-    if (fmt === 'json') {
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    } else {
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    }
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    const stream = await this.usersService.exportHistory(wallet, fmt);
-
-    stream.on('error', (err) => {
-      if (!res.headersSent) {
-        res.status(500).json({ message: 'Export failed', error: err.message });
-      } else {
-        res.end();
-      }
-    });
-
-    stream.pipe(res);
+    await this.streamHistoryExport(wallet, format, res);
   }
 
   /**
@@ -171,5 +148,55 @@ export class UsersController {
   @Get(':wallet/stakes')
   async getStakes(@Param('wallet') wallet: string) {
     return this.callsService.getStakesByWallet(wallet);
+  }
+
+  /**
+   * GET /users/:wallet/export?format=csv|json
+   *
+   * BE-31 — streams the given wallet's prediction history with a
+   * per-row PnL, in the same shape as `GET /users/me/export-history`
+   * (kept for backward compatibility). Capped at MAX_EXPORT_ROWS rows.
+   */
+  @Get(':wallet/export')
+  async exportWalletHistory(
+    @Param('wallet') wallet: string,
+    @Query('format') format: string = 'csv',
+    @Res() res: Response,
+  ) {
+    await this.streamHistoryExport(wallet, format, res);
+  }
+
+  private async streamHistoryExport(
+    wallet: string,
+    format: string,
+    res: Response,
+  ): Promise<void> {
+    const fmt = (format === 'json' ? 'json' : 'csv') as ExportFormat;
+    const timestamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filename = `history-${wallet.slice(0, 8)}-${timestamp}.${fmt}`;
+
+    if (fmt === 'json') {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    } else {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    }
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const stream = await this.usersService.exportHistory(wallet, fmt);
+
+    stream.on('error', (err) => {
+      if (!res.headersSent) {
+        // Transfer-Encoding: chunked was set proactively above; res.json()
+        // sets Content-Length, and a response can't declare both, so it
+        // must be cleared before falling back to a normal JSON error body.
+        res.removeHeader('Transfer-Encoding');
+        res.status(500).json({ message: 'Export failed', error: err.message });
+      } else {
+        res.end();
+      }
+    });
+
+    stream.pipe(res);
   }
 }

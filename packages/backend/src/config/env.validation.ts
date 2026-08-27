@@ -88,6 +88,18 @@ export const validationSchema = Joi.object({
       'string.pattern.base':
         'CALL_REGISTRY_ADDRESS must be a valid EVM address (0x + 40 hex chars)',
     }),
+  // Shared secret used to verify the HMAC-SHA256 X-Signature header on
+  // external indexer webhook callbacks (see IndexerWebhookGuard).
+  INDEXER_WEBHOOK_SECRET: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().min(32).required().messages({
+        'any.required': 'INDEXER_WEBHOOK_SECRET is required in production',
+        'string.min':
+          'INDEXER_WEBHOOK_SECRET must be at least 32 characters in production',
+      }),
+      otherwise: Joi.string().default('dev-indexer-webhook-secret'),
+    }),
 
   // ── IPFS ───────────────────────────────────────────────────────────────
   IPFS_API_URL: Joi.string()
@@ -97,6 +109,14 @@ export const validationSchema = Joi.object({
 
   // ── Admin ──────────────────────────────────────────────────────────────
   ADMIN_API_KEY: Joi.string().optional(),
+
+  // ── Health checks ────────────────────────────────────────────────────────
+  // Max number of non-critical dependencies (cache, RPCs, disk) allowed to be
+  // down at once before GET /health/ready reports `error` instead of `degraded`.
+  HEALTH_DEGRADED_THRESHOLD: Joi.number().min(0).default(1),
+  SOROBAN_RPC_URL: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .optional(),
 
   // ── Redis (optional — falls back to in-memory cache) ────────────────────
   REDIS_URL: Joi.string()
