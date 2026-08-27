@@ -9,6 +9,10 @@ import { rpc as SorobanRpc } from '@stellar/stellar-sdk';
 import * as StellarSdk from '@stellar/stellar-sdk';
 
 import { Call, ChainType } from '../entities/call.entity';
+import {
+  InMemoryLedgerCheckpointStore,
+  LedgerCheckpointStore,
+} from './ledger-checkpoint.service';
 
 export interface StellarIndexerConfig {
   rpcUrl: string;
@@ -40,8 +44,21 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
   private config: StellarIndexerConfig;
   private callRepository: Repository<Call>;
 
+  private checkpointStore: LedgerCheckpointStore =
+    new InMemoryLedgerCheckpointStore();
+
   constructor(callRepository: Repository<Call>) {
     this.callRepository = callRepository;
+  }
+
+  /** Inject a durable checkpoint store (defaults to in-memory). */
+  setCheckpointStore(store: LedgerCheckpointStore): void {
+    this.checkpointStore = store;
+  }
+
+  /** Stable key for this indexer stream, derived from its watched contracts. */
+  private get checkpointKey(): string {
+    return `stellar:${(this.config?.contractIds ?? []).slice().sort().join(',')}`;
   }
 
   async initialize(config: StellarIndexerConfig): Promise<void> {
@@ -89,8 +106,14 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
     this.isRunning = true;
     this.logger.log('Starting Stellar Indexer...');
 
-    // Get the latest ledger as starting point if not specified
-    if (!this.config.startLedger) {
+    // Resume from a persisted checkpoint if one exists, so restarts don't
+    // re-scan or skip ledgers.
+    const checkpoint = await this.checkpointStore.load(this.checkpointKey);
+    if (checkpoint !== null) {
+      this.currentLedger = checkpoint;
+      this.logger.log(`Resuming from checkpoint ledger ${checkpoint}`);
+    } else if (!this.config.startLedger) {
+      // Get the latest ledger as starting point if not specified
       try {
         const latestLedger = await this.sorobanRpc.getLatestLedger();
         this.currentLedger = latestLedger.sequence - 100; // Start from 100 ledgers back
@@ -161,6 +184,8 @@ export class StellarIndexerService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.currentLedger = toLedger + 1;
+      // Persist the cursor so a restart resumes exactly after this window.
+      await this.checkpointStore.save(this.checkpointKey, this.currentLedger);
     } catch (error) {
       if (this.config && retryCount < (this.config.maxRetries || 0)) {
         this.logger.warn(

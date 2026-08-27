@@ -15,10 +15,11 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   rpc,
-  Contract,
+  Horizon,
   xdr,
   scValToNative,
   Address,
+  StrKey,
 } from '@stellar/stellar-sdk';
 import { Retryable } from '../decorators/retryable.decorator';
 import {
@@ -42,10 +43,44 @@ export interface ContractDataResult {
   lastModifiedLedger: number;
 }
 
+export interface HorizonTxRecord {
+  hash: string;
+  ledger: number;
+  createdAt: string;
+  successful: boolean;
+  pagingToken: string;
+}
+
+/**
+ * Converts a raw contract/account id or XDR ScAddress into its canonical
+ * StrKey form: `C...` for contracts, `G...` for accounts. Pure and safe to use
+ * for logging / de-duplication regardless of the input representation.
+ */
+export function toStrKeyAddress(input: string | xdr.ScAddress): string {
+  if (typeof input === 'string') {
+    // Already StrKey-encoded — return as-is.
+    if (
+      StrKey.isValidContract(input) ||
+      StrKey.isValidEd25519PublicKey(input)
+    ) {
+      return input;
+    }
+    return Address.fromString(input).toString();
+  }
+  const type = input.switch();
+  if (type === xdr.ScAddressType.scAddressTypeContract()) {
+    return StrKey.encodeContract(input.contractId() as unknown as Buffer);
+  }
+  return StrKey.encodeEd25519PublicKey(
+    input.accountId().ed25519() as unknown as Buffer,
+  );
+}
+
 @Injectable()
 export class SorobanRpcClient implements OnModuleInit {
   private readonly logger = new Logger(SorobanRpcClient.name);
   private rpc: rpc.Server;
+  private horizon: Horizon.Server;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -57,7 +92,51 @@ export class SorobanRpcClient implements OnModuleInit {
     this.rpc = new rpc.Server(rpcUrl, {
       allowHttp: rpcUrl.startsWith('http://'),
     });
-    this.logger.log(`Soroban RPC client initialised → ${rpcUrl}`);
+    const horizonUrl = this.config.get<string>(
+      'HORIZON_URL',
+      'https://horizon-testnet.stellar.org',
+    );
+    this.horizon = new Horizon.Server(horizonUrl, {
+      allowHttp: horizonUrl.startsWith('http://'),
+    });
+    this.logger.log(
+      `Soroban RPC client initialised → ${rpcUrl} (Horizon fallback → ${horizonUrl})`,
+    );
+  }
+
+  /**
+   * Fallback transaction-history reader via Horizon, used when the Soroban RPC
+   * `getEvents` window is unavailable (e.g. ledger pruned beyond RPC retention)
+   * or returns nothing. Reads operations for a contract/account and returns
+   * paged transaction records with a cursor for checkpointed continuation.
+   */
+  @Retryable({
+    maxAttempts: 4,
+    baseDelayMs: 1_000,
+    isRetryable: defaultSorobanIsRetryable,
+    operationName: 'horizon:getTransactionHistory',
+  })
+  async getTransactionHistoryViaHorizon(params: {
+    account: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<HorizonTxRecord[]> {
+    const { account, cursor, limit = 100 } = params;
+    let builder = this.horizon
+      .transactions()
+      .forAccount(toStrKeyAddress(account))
+      .order('asc')
+      .limit(limit);
+    if (cursor) builder = builder.cursor(cursor);
+
+    const page = await builder.call();
+    return page.records.map((tx) => ({
+      hash: tx.hash,
+      ledger: tx.ledger_attr,
+      createdAt: tx.created_at,
+      successful: tx.successful,
+      pagingToken: tx.paging_token,
+    }));
   }
 
   // ─── Health / connectivity ──────────────────────────────────────────────
@@ -152,8 +231,8 @@ export class SorobanRpcClient implements OnModuleInit {
       ledger: e.ledger,
       ledgerClosedAt: e.ledgerClosedAt,
       contractId: e.contractId?.toString() ?? '',
-      topic: e.topic.map(scValToNative),
-      value: scValToNative(e.value),
+      topic: e.topic.map(scValToNative) as unknown[],
+      value: scValToNative(e.value) as unknown,
     }));
   }
 
