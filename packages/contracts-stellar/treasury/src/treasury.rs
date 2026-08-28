@@ -4,18 +4,22 @@
 //! provides convenience helpers that can be called from tests or other crates
 //! when a shared treasury address is needed.
 
-use soroban_sdk::{Address, Env};
-
+use crate::types::ContractError;
+use soroban_sdk::{panic_with_error, Address, Env};
 const TREASURY_KEY: &str = "TREASURY";
 
 /// Persist a treasury address under a simple instance key (legacy helper).
 pub fn set_treasury(env: &Env, addr: Address) {
     env.storage().instance().set(&TREASURY_KEY, &addr);
+    env.storage().instance().extend_ttl(3600, 3600);
 }
 
 /// Retrieve the treasury address set via `set_treasury`.
 pub fn get_treasury(env: &Env) -> Address {
-    env.storage().instance().get(&TREASURY_KEY).unwrap()
+    env.storage()
+        .instance()
+        .get(&TREASURY_KEY)
+        .unwrap_or_else(|| panic_with_error!(env, ContractError::TreasuryNotSet))
 }
 
 /// Validate that a fee bps value is within the protocol range [50, 200].
