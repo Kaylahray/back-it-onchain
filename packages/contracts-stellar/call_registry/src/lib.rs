@@ -661,11 +661,7 @@ impl CallRegistry {
         }
 
         let stake_key = DataKey::UserStake(call_id, user.clone(), outcome_index);
-        let user_stake: i128 = env
-            .storage()
-            .persistent()
-            .get(&stake_key)
-            .unwrap_or(0);
+        let user_stake: i128 = env.storage().persistent().get(&stake_key).unwrap_or(0);
 
         if user_stake <= 0 {
             panic!("{:?}", ContractError::NoStakeFound);
@@ -914,7 +910,12 @@ impl CallRegistry {
     /// Validates weights.len() == to.len() && sum(weights) > 0.
     /// Uses checked_mul/div. Dust remainder (< number of recipients) goes to treasury
     /// (from FeeConfig if set, else first recipient).
-    pub fn distribute_dividends(env: Env, stake_token: Address, to: Vec<Address>, weights: Vec<i128>) {
+    pub fn distribute_dividends(
+        env: Env,
+        stake_token: Address,
+        to: Vec<Address>,
+        weights: Vec<i128>,
+    ) {
         let admin = Self::get_admin(&env);
         admin.require_auth();
 
@@ -971,9 +972,7 @@ impl CallRegistry {
         }
 
         // Dust remainder goes to treasury (SC-016)
-        let dust = total_fees
-            .checked_sub(distributed)
-            .unwrap_or(0);
+        let dust = total_fees.checked_sub(distributed).unwrap_or(0);
         if dust > 0 {
             let treasury_addr = env
                 .storage()
@@ -1090,12 +1089,12 @@ impl CallRegistry {
         env.storage().instance().set(&DataKey::FeeConfig, &config);
         // Instance storage TTL is managed by the runtime; bump not strictly required
         // but we extend for consistency with persistent writes.
-        env.storage().instance().extend_ttl(TTL_THRESHOLD, LEDGERS_PER_YEAR);
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, LEDGERS_PER_YEAR);
 
-        env.events().publish(
-            (Symbol::new(&env, "FeeConfigUpdated"),),
-            (bps, treasury),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "FeeConfigUpdated"),), (bps, treasury));
     }
 
     /// Read the current FeeConfig. Panics if not set.
