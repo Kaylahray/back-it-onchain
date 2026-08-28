@@ -46,9 +46,6 @@ export class AuditLog {
   @Column({ type: 'jsonb', nullable: true })
   payload: Record<string, unknown>;
 
-  @Column({ nullable: true })
-  evidenceCid: string;
-
   @CreateDateColumn()
   createdAt: Date;
 }
