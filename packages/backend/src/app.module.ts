@@ -29,6 +29,7 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { PlatformSettings } from './indexer/platform-settings.entity';
 import { BadgesModule } from './badges/badges.module';
 import { UserBadge } from './badges/badge.entity';
+import { AuditLog } from './oracle/audit-log.entity';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { GatewaysModule } from './gateways/gateways.module';
@@ -80,6 +81,7 @@ import { HealthModule } from './health/health.module';
           Notification,
           PlatformSettings,
           UserBadge,
+          AuditLog,
         ],
 
         synchronize: true,
