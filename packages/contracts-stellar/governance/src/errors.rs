@@ -103,4 +103,10 @@ pub enum ContractError {
     // ── Binary Market View Errors (SC-002) ────────────────────────────────
     /// Pools length is not exactly 2 for binary market view.
     InvalidOutcomeCount = 39,
+
+    // ── Fee Configuration Errors (SC-017) ─────────────────────────────────
+    /// Fee bps outside the allowed range [50, 200] or invalid treasury.
+    InvalidFeeConfig = 40,
+    /// Weights vector length does not match recipients (SC-016).
+    InvalidWeights = 41,
 }

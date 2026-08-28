@@ -466,19 +466,25 @@ fn test_distribute_dividends() {
 
     let holder_a = Address::generate(&env);
     let holder_b = Address::generate(&env);
+    let holder_c = Address::generate(&env);
 
-    // Distribute: holder_a has weight 3, holder_b has weight 2 â†’ total 5
-    // holder_a gets 50 * 3/5 = 30, holder_b gets 50 * 2/5 = 20
-    let stakers = vec![&env, (holder_a.clone(), 3i128), (holder_b.clone(), 2i128)];
-    client.distribute_dividends(&stake_token, &stakers);
+    // Distribute to 3 recipients (SC-016): weights 3, 2, 1 → total 6
+    // holder_a: 50*3/6=25, holder_b: 50*2/6=16, holder_c: 50*1/6=8 → dust 1
+    let to = vec![&env, holder_a.clone(), holder_b.clone(), holder_c.clone()];
+    let weights = vec![&env, 3i128, 2i128, 1i128];
+    let treasury = Address::generate(&env);
+    client.update_fee_config(&100u32, &treasury);
+    client.distribute_dividends(&stake_token, &to, &weights);
 
-    assert_eq!(stake_token_client.balance(&holder_a), 30);
-    assert_eq!(stake_token_client.balance(&holder_b), 20);
+    assert_eq!(stake_token_client.balance(&holder_a), 25);
+    assert_eq!(stake_token_client.balance(&holder_b), 16);
+    assert_eq!(stake_token_client.balance(&holder_c), 8);
+    assert_eq!(stake_token_client.balance(&treasury), 1);
     assert_eq!(client.get_platform_fees(), 0);
 }
 
 #[test]
-#[should_panic(expected = "No fees to distribute")]
+#[should_panic(expected = "NoFeesToDistribute")]
 fn test_distribute_dividends_no_fees() {
     let env = Env::default();
     env.mock_all_auths();
@@ -492,8 +498,9 @@ fn test_distribute_dividends_no_fees() {
     let stake_token = stake_token_contract.address();
 
     let holder = Address::generate(&env);
-    let stakers = vec![&env, (holder.clone(), 1i128)];
-    client.distribute_dividends(&stake_token, &stakers);
+    let to = vec![&env, holder.clone()];
+    let weights = vec![&env, 1i128];
+    client.distribute_dividends(&stake_token, &to, &weights);
 }
 
 // â”€â”€ Issue #170: Decentralized Token Whitelisting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1635,4 +1642,159 @@ fn test_zero_amount_stake_panics() {
 
     // Staking 0 must be rejected before any transfer happens.
     client.stake_on_call(&call_id, &staker, &0, &1u32);
+}
+
+// ── SC-015: double withdraw reverts & fee accumulates ───────────────────────
+
+#[test]
+#[should_panic(expected = "AlreadyWithdrawn")]
+fn test_withdraw_payout_double_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let creator = Address::generate(&env);
+    let staker_a = Address::generate(&env);
+    let staker_b = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &10_000);
+    stake_token_admin_client.mint(&staker_a, &10_000);
+    stake_token_admin_client.mint(&staker_b, &10_000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 1000;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &multi_metadata(&env, 2),
+    );
+    client.stake_on_call(&call_id, &staker_a, &1000, &0u32);
+    client.stake_on_call(&call_id, &staker_b, &500, &1u32);
+
+    env.ledger().set_timestamp(end_ts + 1);
+    client.finalize_call(&call_id, &0u32, &2000i128, &creator);
+
+    client.withdraw_payout(&call_id, &staker_a, &0u32);
+    // Second withdraw must revert
+    client.withdraw_payout(&call_id, &staker_a, &0u32);
+}
+
+#[test]
+fn test_withdraw_payout_fee_accumulates() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let creator = Address::generate(&env);
+    let staker_a = Address::generate(&env);
+    let staker_b = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &10_000);
+    stake_token_admin_client.mint(&staker_a, &10_000);
+    stake_token_admin_client.mint(&staker_b, &10_000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 1000;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &multi_metadata(&env, 2),
+    );
+    // fees from stake: ~50bp each
+    client.stake_on_call(&call_id, &staker_a, &1000, &0u32);
+    client.stake_on_call(&call_id, &staker_b, &1000, &1u32);
+    let fees_after_stake = client.get_platform_fees();
+    assert!(fees_after_stake > 0);
+
+    env.ledger().set_timestamp(end_ts + 1);
+    client.finalize_call(&call_id, &0u32, &2000i128, &creator);
+
+    client.withdraw_payout(&call_id, &staker_a, &0u32);
+    let fees_after_withdraw = client.get_platform_fees();
+    // Fee from share_of_losers should have been added
+    assert!(fees_after_withdraw > fees_after_stake);
+}
+
+// ── SC-017: FeeConfig update ────────────────────────────────────────────────
+
+#[test]
+fn test_update_fee_config_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let treasury = Address::generate(&env);
+    client.update_fee_config(&100u32, &treasury);
+    let cfg = client.get_fee_config();
+    assert_eq!(cfg.bps, 100);
+    assert_eq!(cfg.treasury, treasury);
+}
+
+#[test]
+#[should_panic(expected = "InvalidFeeConfig")]
+fn test_update_fee_config_bps_too_low() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let treasury = Address::generate(&env);
+    client.update_fee_config(&49u32, &treasury);
+}
+
+#[test]
+#[should_panic(expected = "InvalidFeeConfig")]
+fn test_update_fee_config_bps_too_high() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let treasury = Address::generate(&env);
+    client.update_fee_config(&201u32, &treasury);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_distribute_dividends_non_admin() {
+    let env = Env::default();
+    // Do not mock all auths so non-admin fails
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Manually set some platform fees by using admin path is hard without mock;
+    // instead just call and expect auth failure on admin.require_auth
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let holder = Address::generate(&env);
+    let to = vec![&env, holder];
+    let weights = vec![&env, 1i128];
+    // Without mock_all_auths, require_auth on admin will fail
+    client.distribute_dividends(&stake_token, &to, &weights);
 }
