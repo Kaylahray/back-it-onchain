@@ -1,9 +1,9 @@
-#![cfg(test)]
+﻿#![cfg(test)]
 
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
-    vec, Address, BytesN, Env, IntoVal, String, Symbol,
+    vec, Address, BytesN, Env, IntoVal, String, Symbol, Val,
 };
 
 fn default_metadata(env: &Env) -> CreateCallMetadata {
@@ -15,7 +15,7 @@ fn default_metadata(env: &Env) -> CreateCallMetadata {
     }
 }
 
-// ── Existing tests (preserved) ────────────────────────────────────────────────
+// â”€â”€ Existing tests (preserved) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_create_call() {
@@ -69,7 +69,7 @@ fn test_create_call() {
 #[test]
 #[should_panic]
 fn test_create_call_requires_creator_auth() {
-    // #314 — create_call must reject a call that isn't authorized by the
+    // #314 â€” create_call must reject a call that isn't authorized by the
     // declared creator, even if some other address's auth is mocked.
     let env = Env::default();
 
@@ -105,7 +105,7 @@ fn test_create_call_requires_creator_auth() {
     }]);
     client.whitelist_token_admin(&stake_token);
 
-    // No auth mocked for `creator` at all — create_call must panic on
+    // No auth mocked for `creator` at all â€” create_call must panic on
     // `creator.require_auth()` before any state or token transfer happens.
     let end_ts = env.ledger().timestamp() + 1000;
     client.create_call(
@@ -343,19 +343,19 @@ fn test_unpause_requires_admin_auth() {
     client.unpause();
 }
 
-// ── Issue #161: Dynamic surge fee ────────────────────────────────────────────
+// â”€â”€ Issue #161: Dynamic surge fee â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_surge_fee_basis_points() {
-    // 0 participants → 50 bp
+    // 0 participants â†’ 50 bp
     assert_eq!(compute_fee_basis_points(0), 50);
-    // 10 participants → 55 bp
+    // 10 participants â†’ 55 bp
     assert_eq!(compute_fee_basis_points(10), 55);
-    // 100 participants → 100 bp
+    // 100 participants â†’ 100 bp
     assert_eq!(compute_fee_basis_points(100), 100);
-    // 300 participants → capped at 200 bp
+    // 300 participants â†’ capped at 200 bp
     assert_eq!(compute_fee_basis_points(300), 200);
-    // 1000 participants → still capped at 200 bp
+    // 1000 participants â†’ still capped at 200 bp
     assert_eq!(compute_fee_basis_points(1000), 200);
 }
 
@@ -387,7 +387,7 @@ fn test_stake_applies_surge_fee() {
         &default_metadata(&env),
     );
 
-    // participant_count = 1 → fee_bps = 50; stake 10_000 → fee = 50, net = 9_950
+    // participant_count = 1 â†’ fee_bps = 50; stake 10_000 â†’ fee = 50, net = 9_950
     client.stake_on_call(&call_id, &staker, &10_000, &1u32);
 
     let call = client.get_call(&call_id);
@@ -425,11 +425,11 @@ fn test_get_fee_basis_points() {
         &default_metadata(&env),
     );
 
-    // 1 participant → 50 bp
+    // 1 participant â†’ 50 bp
     assert_eq!(client.get_fee_basis_points(&call_id), 50);
 }
 
-// ── Issue #160: distribute_dividends ─────────────────────────────────────────
+// â”€â”€ Issue #160: distribute_dividends â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_distribute_dividends() {
@@ -467,7 +467,7 @@ fn test_distribute_dividends() {
     let holder_a = Address::generate(&env);
     let holder_b = Address::generate(&env);
 
-    // Distribute: holder_a has weight 3, holder_b has weight 2 → total 5
+    // Distribute: holder_a has weight 3, holder_b has weight 2 â†’ total 5
     // holder_a gets 50 * 3/5 = 30, holder_b gets 50 * 2/5 = 20
     let stakers = vec![&env, (holder_a.clone(), 3i128), (holder_b.clone(), 2i128)];
     client.distribute_dividends(&stake_token, &stakers);
@@ -496,7 +496,7 @@ fn test_distribute_dividends_no_fees() {
     client.distribute_dividends(&stake_token, &stakers);
 }
 
-// ── Issue #170: Decentralized Token Whitelisting ──────────────────────────────
+// â”€â”€ Issue #170: Decentralized Token Whitelisting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_propose_and_vouch_whitelist() {
@@ -522,13 +522,13 @@ fn test_propose_and_vouch_whitelist() {
 
     client.propose_token(&proposer, &token);
 
-    // Two vouches — not yet whitelisted
+    // Two vouches â€” not yet whitelisted
     client.vouch_for_token(&staker1, &token);
     assert!(!client.is_token_whitelisted(&token));
     client.vouch_for_token(&staker2, &token);
     assert!(!client.is_token_whitelisted(&token));
 
-    // Third vouch → auto-whitelisted
+    // Third vouch â†’ auto-whitelisted
     client.vouch_for_token(&staker3, &token);
     assert!(client.is_token_whitelisted(&token));
 }
@@ -549,7 +549,7 @@ fn test_duplicate_vouch_ignored() {
     let proposer = Address::generate(&env);
     client.propose_token(&proposer, &token);
 
-    // Same staker vouches twice — only one counted
+    // Same staker vouches twice â€” only one counted
     client.vouch_for_token(&staker, &token);
     client.vouch_for_token(&staker, &token);
 
@@ -611,7 +611,7 @@ fn test_create_call_rejects_non_whitelisted_token() {
     let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
     stake_token_admin_client.mint(&creator, &1000);
 
-    // No whitelist call — should panic
+    // No whitelist call â€” should panic
     client.create_call(
         &creator,
         &stake_token,
@@ -621,7 +621,7 @@ fn test_create_call_rejects_non_whitelisted_token() {
     );
 }
 
-// ── Issue #169: Storage TTL & Archival ───────────────────────────────────────
+// â”€â”€ Issue #169: Storage TTL & Archival â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_archive_settled_call() {
@@ -690,7 +690,7 @@ fn test_archive_unsettled_call_panics() {
     client.archive_call(&call_id);
 }
 
-// ── Early Exit (Hedging / Position Closing) ────────────────────────────────────
+// â”€â”€ Early Exit (Hedging / Position Closing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[test]
 fn test_exit_early_yes_position() {
@@ -821,7 +821,7 @@ fn test_exit_early_no_stake() {
         &default_metadata(&env),
     );
 
-    // rando has no stake — should panic
+    // rando has no stake â€” should panic
     client.exit_early(&call_id, &rando);
 }
 
@@ -890,7 +890,7 @@ fn test_exit_early_after_settled() {
     env.ledger().set_timestamp(end_ts + 1);
     client.finalize_call(&call_id, &0u32, &1000i128, &creator);
 
-    // Try to exit early — should panic
+    // Try to exit early â€” should panic
     client.exit_early(&call_id, &creator);
 }
 
@@ -1026,7 +1026,7 @@ fn test_exit_early_paused() {
     client.exit_early(&call_id, &creator);
 }
 
-// ── Multi-Outcome Markets (Scalar/Categorical) ─────────────────────────────────
+// â”€â”€ Multi-Outcome Markets (Scalar/Categorical) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn multi_metadata(env: &Env, num_outcomes: u32) -> CreateCallMetadata {
     CreateCallMetadata {
@@ -1211,7 +1211,7 @@ fn test_withdraw_multi_outcome() {
     env.ledger().set_timestamp(end_ts + 1);
     client.finalize_call(&call_id, &1u32, &2000i128, &creator);
 
-    // staker_a withdraws — should get their stake + proportional share of losing pools
+    // staker_a withdraws â€” should get their stake + proportional share of losing pools
     // Winners pool = 995, losers pool = 100 + 498 = 598
     // Payout = 995 + (995 * 598 / 995) = 995 + 598 = 1593
     let balance_before = stake_token_client.balance(&staker_a);
@@ -1369,11 +1369,270 @@ fn test_exit_early_multi_outcome() {
     let call = client.get_call(&call_id);
     assert_eq!(call.outcome_pools.get(1).unwrap(), 0);
     // Other pools (0, 2, 3) should have the 199 penalty distributed proportionally
-    // outcome 0 = 100, outcome 2 = 498, outcome 3 = 0 → total other = 598
+    // outcome 0 = 100, outcome 2 = 498, outcome 3 = 0 â†’ total other = 598
     // outcome 0 gets: 100 + 199 * 100 / 598 = 100 + 33 = 133
     // outcome 2 gets: 498 + 199 * 498 / 598 = 498 + 165 = 663
     // outcome 3 gets: 0 (no existing stake, no share)
     assert_eq!(call.outcome_pools.get(0).unwrap(), 133);
     assert_eq!(call.outcome_pools.get(2).unwrap(), 663);
     assert_eq!(call.outcome_pools.get(3).unwrap(), 0);
+}
+
+// â”€â”€ Issue #315 (SC-002): Binary Market Backward Compatibility Shims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+#[test]
+fn test_get_binary_pools() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let creator = Address::generate(&env);
+    let staker = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &10_000);
+    stake_token_admin_client.mint(&staker, &10_000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 1000;
+    // Creator stakes 100 on YES (outcome 0).
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+
+    // Staker backs NO (outcome 1): 1000 gross â†’ 995 net after 50 bp surge fee.
+    client.stake_on_call(&call_id, &staker, &1000, &1u32);
+
+    let (yes, no) = client.get_binary_pools(&call_id);
+    assert_eq!(yes, 100);
+    assert_eq!(no, 995);
+}
+
+#[test]
+#[should_panic(expected = "Pools length must be 2 for binary market")]
+fn test_get_binary_pools_non_binary_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &10_000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 1000;
+    // 3-outcome market is NOT binary â†’ get_binary_pools must panic.
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &multi_metadata(&env, 3),
+    );
+
+    client.get_binary_pools(&call_id);
+}
+
+// â”€â”€ Issue #316 (SC-003): SAC Escrow with Balance-Delta Guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Mock fee-on-transfer token: the receiver's balance grows by only 90% of the
+// transferred `amount` (10% fee kept by the token), so CallRegistry's balance-
+// delta escrow sees `net < amount`.
+mod fee_token {
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+    /// 10% fee on every transfer.
+    const FEE_BPS: i128 = 1000;
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum DataKey {
+        Balance(Address),
+    }
+
+    #[contract]
+    pub struct FeeToken;
+
+    #[contractimpl]
+    impl FeeToken {
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .instance()
+                .get(&DataKey::Balance(id))
+                .unwrap_or(0)
+        }
+
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let current: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::Balance(to.clone()))
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::Balance(to.clone()), &(current + amount));
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let from_balance: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::Balance(from.clone()))
+                .unwrap_or(0);
+            if from_balance < amount {
+                panic!("insufficient balance");
+            }
+            env.storage()
+                .instance()
+                .set(&DataKey::Balance(from.clone()), &(from_balance - amount));
+
+            // Fee-on-transfer: only 90% of `amount` lands in `to`'s balance.
+            let fee = amount * FEE_BPS / 10_000;
+            let net = amount - fee;
+            let to_balance: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::Balance(to.clone()))
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::Balance(to.clone()), &(to_balance + net));
+        }
+
+        pub fn approve(
+            _env: Env,
+            _from: Address,
+            _spender: Address,
+            _amount: i128,
+            _expiration_ledger: u32,
+        ) {
+            // Not exercised by the balance-delta tests (no vault configured).
+        }
+    }
+}
+
+#[test]
+fn test_fee_on_transfer_tokens() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Register the 10%-fee-on-transfer token and whitelist it.
+    let stake_token = env.register_contract(None, fee_token::FeeToken);
+    let fee_token_client = fee_token::FeeTokenClient::new(&env, &stake_token);
+    client.whitelist_token_admin(&stake_token);
+
+    let creator = Address::generate(&env);
+    let staker = Address::generate(&env);
+    fee_token_client.mint(&creator, &1000);
+    fee_token_client.mint(&staker, &1000);
+
+    let end_ts = env.ledger().timestamp() + 1000;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+
+    // Contract received 90 (not 100): 10% token fee taken on transfer.
+    let call = client.get_call(&call_id);
+    assert_eq!(call.outcome_pools.get(0).unwrap(), 90);
+    assert_eq!(call.vault_balance, 90);
+    assert_eq!(client.get_user_stake(&call_id, &creator, &0u32), 90);
+    assert_eq!(fee_token_client.balance(&contract_id), 90);
+
+    // CallCreated event carries (gross, net).
+    let events = env.events().all();
+    let last_event = events.last().unwrap();
+    let created_data: Vec<Val> = last_event.2.into_val(&env);
+    let gross: i128 = created_data.get(1).unwrap().into_val(&env);
+    let net: i128 = created_data.get(2).unwrap().into_val(&env);
+    assert_eq!(gross, 100);
+    assert_eq!(net, 90);
+
+    // Stake 1000 on NO: contract receives 900, 50 bp surge fee on 900 = 4, net 896.
+    client.stake_on_call(&call_id, &staker, &1000, &1u32);
+
+    let call = client.get_call(&call_id);
+    assert_eq!(call.outcome_pools.get(1).unwrap(), 896);
+    assert_eq!(call.vault_balance, 986); // 90 + 896
+    assert_eq!(call.participant_count, 2);
+    assert_eq!(client.get_user_stake(&call_id, &staker, &1u32), 896);
+    assert_eq!(client.get_platform_fees(), 4);
+
+    // Contract physically holds 90 + 900 = 990 (= 986 vault + 4 fees).
+    assert_eq!(fee_token_client.balance(&contract_id), 990);
+
+    // StakeAdded event carries (outcome_index, gross, net, fee, fee_bps, ...).
+    let events = env.events().all();
+    let last_event = events.last().unwrap();
+    let symbol: Symbol = last_event.1.get(0).unwrap().into_val(&env);
+    assert_eq!(symbol, Symbol::new(&env, "StakeAdded"));
+    let stake_data: Vec<Val> = last_event.2.into_val(&env);
+    let gross: i128 = stake_data.get(1).unwrap().into_val(&env);
+    let net: i128 = stake_data.get(2).unwrap().into_val(&env);
+    let fee: i128 = stake_data.get(3).unwrap().into_val(&env);
+    let fee_bps: i128 = stake_data.get(4).unwrap().into_val(&env);
+    assert_eq!(gross, 1000);
+    assert_eq!(net, 896);
+    assert_eq!(fee, 4);
+    assert_eq!(fee_bps, 50);
+}
+
+#[test]
+#[should_panic(expected = "Amount must be greater than zero")]
+fn test_zero_amount_stake_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let creator = Address::generate(&env);
+    let staker = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &1000);
+    stake_token_admin_client.mint(&staker, &1000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 1000;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+
+    // Staking 0 must be rejected before any transfer happens.
+    client.stake_on_call(&call_id, &staker, &0, &1u32);
 }

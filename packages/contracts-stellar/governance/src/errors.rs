@@ -99,4 +99,8 @@ pub enum ContractError {
     // ── Arithmetic Errors ─────────────────────────────────────────────────
     /// Arithmetic overflow detected.
     ArithmeticOverflow = 38,
+
+    // ── Binary Market View Errors (SC-002) ────────────────────────────────
+    /// Pools length is not exactly 2 for binary market view.
+    InvalidOutcomeCount = 39,
 }

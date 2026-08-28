@@ -419,7 +419,7 @@ impl CallRegistry {
             panic!("End time must be in future");
         }
         if stake_amount <= 0 {
-            panic!("Invalid amount");
+            panic!("Amount must be greater than zero");
         }
         if metadata.num_outcomes < MIN_OUTCOMES {
             panic!("Must have at least 2 outcomes");
@@ -428,12 +428,20 @@ impl CallRegistry {
             panic!("Too many outcomes");
         }
 
-        // Transfer stake from creator to contract
+        // Transfer stake from creator to contract (SAC escrow with
+        // balance-delta guard: fee-on-transfer tokens may deliver less than
+        // `stake_amount`, so record the actual delta received).
         let token_client = token::Client::new(&env, &stake_token);
+        let balance_before = token_client.balance(&env.current_contract_address());
         token_client.transfer(&creator, &env.current_contract_address(), &stake_amount);
+        let balance_after = token_client.balance(&env.current_contract_address());
+        let net_amount = balance_after - balance_before;
+        if net_amount <= 0 {
+            panic!("Amount must be greater than zero");
+        }
 
-        // Deposit into vault (issue #159)
-        Self::vault_deposit(&env, &stake_token, stake_amount);
+        // Deposit net (post token-fee) amount into vault (issue #159)
+        Self::vault_deposit(&env, &stake_token, net_amount);
 
         let call_id = env
             .storage()
@@ -450,7 +458,7 @@ impl CallRegistry {
         let mut outcome_pools = Vec::new(&env);
         for i in 0..metadata.num_outcomes {
             if i == 0 {
-                outcome_pools.push_back(stake_amount);
+                outcome_pools.push_back(net_amount);
             } else {
                 outcome_pools.push_back(0i128);
             }
@@ -468,7 +476,7 @@ impl CallRegistry {
             settled: false,
             winning_outcome: u32::MAX,
             final_price: 0,
-            vault_balance: stake_amount,
+            vault_balance: net_amount,
             participant_count: 1,
         };
 
@@ -483,14 +491,15 @@ impl CallRegistry {
         let creator_stake_key = DataKey::UserStake(call_id, creator.clone(), 0u32);
         env.storage()
             .persistent()
-            .set(&creator_stake_key, &stake_amount);
+            .set(&creator_stake_key, &net_amount);
         bump_persistent_ttl(&env, &creator_stake_key);
 
         env.events().publish(
             (Symbol::new(&env, "CallCreated"), call_id, creator),
             (
                 stake_token,
-                stake_amount,
+                stake_amount, // gross amount attempted
+                net_amount,   // net amount actually received
                 start_ts,
                 end_ts,
                 metadata.token_address,
@@ -531,20 +540,28 @@ impl CallRegistry {
             panic!("Call settled");
         }
         if amount <= 0 {
-            panic!("Invalid amount");
+            panic!("Amount must be greater than zero");
         }
         if outcome_index >= call.outcome_pools.len() as u32 {
             panic!("Invalid outcome index");
         }
 
-        // Transfer full amount from staker to contract
+        // Transfer full amount from staker to contract (SAC escrow with
+        // balance-delta guard: fee-on-transfer tokens may deliver less than
+        // `amount`, so the delta received drives fee + pool bookkeeping).
         let token_client = token::Client::new(&env, &call.stake_token);
+        let balance_before = token_client.balance(&env.current_contract_address());
         token_client.transfer(&staker, &env.current_contract_address(), &amount);
+        let balance_after = token_client.balance(&env.current_contract_address());
+        let received = balance_after - balance_before;
+        if received <= 0 {
+            panic!("Amount must be greater than zero");
+        }
 
-        // Dynamic surge fee (issue #161)
+        // Dynamic surge fee (issue #161) applied on the actually-received amount
         let fee_bps = compute_fee_basis_points(call.participant_count);
-        let fee = amount * fee_bps / 10_000;
-        let net_amount = amount - fee;
+        let fee = received * fee_bps / 10_000;
+        let net_amount = received - fee;
 
         // Accumulate platform fee for dividend distribution (issue #160)
         if fee > 0 {
@@ -563,9 +580,16 @@ impl CallRegistry {
 
         // Update the targeted outcome pool
         let current_pool = call.outcome_pools.get(outcome_index).unwrap();
-        call.outcome_pools
-            .set(outcome_index, current_pool + net_amount);
-        call.vault_balance += net_amount;
+        call.outcome_pools.set(
+            outcome_index,
+            current_pool
+                .checked_add(net_amount)
+                .expect("Arithmetic overflow"),
+        );
+        call.vault_balance = call
+            .vault_balance
+            .checked_add(net_amount)
+            .expect("Arithmetic overflow");
         call.participant_count += 1;
         env.storage().persistent().set(&key, &call);
         // Bump TTL on every stake interaction (issue #169)
@@ -582,6 +606,7 @@ impl CallRegistry {
             (Symbol::new(&env, "StakeAdded"), call_id, staker),
             (
                 outcome_index,
+                amount, // gross amount attempted
                 net_amount,
                 fee,
                 fee_bps,
@@ -945,6 +970,25 @@ impl CallRegistry {
             .get(&DataKey::Call(call_id))
             .expect("Call does not exist");
         compute_fee_basis_points(call.participant_count)
+    }
+
+    // ── Binary market view shims (issue #315) ──────────────────────────────
+
+    /// Backward-compatible shim for legacy callers expecting `totalStakeYes/No`.
+    /// Returns `(total_stake_yes, total_stake_no)` from `outcome_pools`.
+    /// Panics if pools.len() != 2 (not a binary market).
+    pub fn get_binary_pools(env: Env, call_id: u64) -> (i128, i128) {
+        let call: Call = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Call(call_id))
+            .expect("Call does not exist");
+        if call.outcome_pools.len() != 2 {
+            panic!("Pools length must be 2 for binary market");
+        }
+        let yes = call.outcome_pools.get(0).unwrap();
+        let no = call.outcome_pools.get(1).unwrap();
+        (yes, no)
     }
 }
 
