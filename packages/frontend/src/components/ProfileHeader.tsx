@@ -23,6 +23,12 @@ interface ProfileHeaderProps {
   socialStats: SocialStats;
   currentChain?: 'stellar' | 'base';
   onEditProfile?: () => void;
+  /** 0–100 reputation score; omitted while it is still loading or unknown. */
+  reputationScore?: number | null;
+  /** Follow / export controls rendered next to the edit button. */
+  actions?: React.ReactNode;
+  /** Hides the edit button on someone else's profile. */
+  showEditButton?: boolean;
 }
 
 export function ProfileHeader({
@@ -30,6 +36,9 @@ export function ProfileHeader({
   socialStats,
   currentChain = 'base',
   onEditProfile,
+  reputationScore,
+  actions,
+  showEditButton = true,
 }: ProfileHeaderProps) {
   const displayName = user.displayName || user.wallet.slice(0, 6);
   const chainName = currentChain === 'stellar' ? 'Stellar' : 'Base Sepolia';
@@ -53,14 +62,19 @@ export function ProfileHeader({
               <UserIcon className="h-10 w-10 text-white" />
             </div>
           </div>
-          <button
-            data-testid="edit-profile-button"
-            onClick={onEditProfile}
-            className="px-4 py-2 rounded-full border border-border hover:bg-secondary transition-colors font-medium text-sm flex items-center gap-2"
-          >
-            <Settings className="h-4 w-4" />
-            Edit Profile
-          </button>
+          <div className="flex items-center gap-2">
+            {actions}
+            {showEditButton && (
+              <button
+                data-testid="edit-profile-button"
+                onClick={onEditProfile}
+                className="px-4 py-2 rounded-full border border-border hover:bg-secondary transition-colors font-medium text-sm flex items-center gap-2"
+              >
+                <Settings className="h-4 w-4" />
+                Edit Profile
+              </button>
+            )}
+          </div>
         </div>
 
         {/* User Information Section */}
@@ -78,6 +92,16 @@ export function ProfileHeader({
           <p data-testid="user-bio" className="mt-3 text-sm leading-relaxed">
             {user.bio || 'No bio yet.'}
           </p>
+
+          {typeof reputationScore === 'number' && (
+            <p
+              data-testid="reputation-badge"
+              className="mt-3 inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs font-medium"
+            >
+              <span className="text-muted-foreground">Reputation</span>
+              <span data-testid="reputation-score">{reputationScore}</span>
+            </p>
+          )}
 
           {/* Stats: Location, Website, Join Date */}
           <div className="flex flex-wrap gap-4 mt-4 text-xs text-muted-foreground">
