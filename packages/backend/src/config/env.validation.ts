@@ -144,6 +144,10 @@ export const validationSchema = Joi.object({
   SOROBAN_RPC_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
+  STELLAR_OUTCOME_MANAGER_CONTRACT_ID: Joi.string().optional().messages({
+    'string.base':
+      'STELLAR_OUTCOME_MANAGER_CONTRACT_ID must be a valid Stellar contract address (C...)',
+  }),
 
   // ── Redis (optional — falls back to in-memory cache) ────────────────────
   REDIS_URL: Joi.string()
