@@ -2,6 +2,7 @@ import { Entity, Column, PrimaryGeneratedColumn, Index } from 'typeorm';
 
 export enum LeaderboardPeriod {
   WEEKLY = 'weekly',
+  MONTHLY = 'monthly',
   ALL_TIME = 'all_time',
 }
 
@@ -25,6 +26,12 @@ export class Leaderboard {
 
   @Column({ type: 'float', default: 0 })
   profit: number;
+
+  @Column({ type: 'float', default: 0 })
+  stakeVolume: number;
+
+  @Column({ type: 'float', default: 0 })
+  reputationScore: number;
 
   @Column({ default: 0 })
   totalPredictions: number;
