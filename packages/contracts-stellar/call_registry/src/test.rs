@@ -2096,3 +2096,29 @@ fn test_accrue_fee_accumulates_across_stake_and_hook() {
     assert_eq!(token::Client::new(&env, &stake_token).balance(&holder), 75);
     assert_eq!(client.get_platform_fees(), 0);
 }
+
+// ── SC-090: registry owner getter (treasury ownership mirror source) ─────────
+
+#[test]
+fn test_get_owner_returns_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    assert_eq!(client.get_owner(), admin);
+}
+
+#[test]
+#[should_panic(expected = "Admin not set")]
+fn test_get_owner_before_initialize_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    client.get_owner();
+}
