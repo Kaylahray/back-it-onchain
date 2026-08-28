@@ -6,12 +6,16 @@ import { ArrowLeft, TrendingUp, Clock, ShieldCheck, Users, MessageSquare, Share2
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useGlobalState } from "@/components/GlobalState";
+import * as React from "react";
 import { useState, useEffect } from "react";
 import { Loader } from "@/components/ui/Loader";
 import { PriceChart } from "@/components/PriceChart";
 import { ActivityLog } from "@/components/ActivityLog";
 import { MarketDetailSkeleton } from "@/components/MarketDetailSkeleton";
 import { MarketDetailRightSidebarSkeleton } from "@/components/MarketDetailRightSidebarSkeleton";
+import { PoolBar } from "@/src/components/PoolBar";
+import { ParticipantList } from "@/src/components/ParticipantList";
+import { createMockCallSocket, useCallLive } from "@/src/hooks/useCallLive";
 import * as Dialog from "@radix-ui/react-dialog";
 import { toast } from "sonner";
 
@@ -51,6 +55,22 @@ export default function CallDetailPage() {
     // ─────────────────────────────────────────────────────────────────────────
 
     const call = calls.find(c => c.id === id);
+
+    // FE-05: live pool and participants for this call. The socket factory is
+    // the seam — swapping the mock for the real Socket.io client is a one-line
+    // change here once the `market:<id>` room exists server-side.
+    const socketFactory = React.useMemo(
+        () =>
+            createMockCallSocket({
+                seed: {
+                    yesTotal: Number(call?.totalStakeYes ?? 0) || 0,
+                    noTotal: Number(call?.totalStakeNo ?? 0) || 0,
+                },
+            }),
+        [call?.totalStakeYes, call?.totalStakeNo],
+    );
+
+    const live = useCallLive(id ?? '', { socketFactory });
 
     const stepLabels: Record<string, string> = {
         idle: "",
@@ -175,6 +195,27 @@ export default function CallDetailPage() {
                     <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Target Price</span>
                         <span className="font-medium text-accent">${targetPrice.toFixed(6)}</span>
+                    </div>
+
+                    {/* FE-05: live pool split and participants, pushed over
+                        the `market:<id>` room. */}
+                    <div className="h-px bg-border my-2" />
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">Live pool</span>
+                            {live.connected ? (
+                                <span data-testid="live-indicator" className="text-xs text-green-500">
+                                    Live
+                                </span>
+                            ) : null}
+                        </div>
+
+                        <PoolBar pool={live.pool} />
+
+                        <div className="flex flex-col gap-2">
+                            <span className="text-sm text-muted-foreground">Participants</span>
+                            <ParticipantList participants={live.participants} />
+                        </div>
                     </div>
                 </div>
             </div>
