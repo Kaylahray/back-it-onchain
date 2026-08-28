@@ -1,4 +1,4 @@
-﻿#![cfg(test)]
+#![cfg(test)]
 
 use super::*;
 use soroban_sdk::{
@@ -2091,7 +2091,11 @@ fn test_accrue_fee_accumulates_across_stake_and_hook() {
     let holder = Address::generate(&env);
     let treasury = Address::generate(&env);
     client.update_fee_config(&100u32, &treasury);
-    client.distribute_dividends(&stake_token, &vec![&env, holder.clone()], &vec![&env, 1i128]);
+    client.distribute_dividends(
+        &stake_token,
+        &vec![&env, holder.clone()],
+        &vec![&env, 1i128],
+    );
 
     assert_eq!(token::Client::new(&env, &stake_token).balance(&holder), 75);
     assert_eq!(client.get_platform_fees(), 0);
