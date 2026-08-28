@@ -15,6 +15,7 @@ import {
   LedgerCheckpointStore,
 } from './ledger-checkpoint.service';
 import { CallEventStoreService } from './call-event-store.service';
+import { Retryable } from '../../decorators/retryable.decorator';
 
 export interface StellarIndexerConfig {
   rpcUrl: string;

@@ -51,9 +51,6 @@ export class AuditLog {
   @Column({ type: 'jsonb', nullable: true })
   payload: Record<string, unknown>;
 
-  /** IPFS CID of the pinned evidence JSON, when the action produced one. */
-  @Column({ nullable: true })
-  evidenceCid: string;
 
   /** Chain the action relates to ('base' | 'stellar'), when applicable. */
   @Column({ nullable: true })
