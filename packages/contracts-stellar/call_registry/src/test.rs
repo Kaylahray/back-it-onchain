@@ -212,7 +212,7 @@ fn test_stake_ended_call() {
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
+#[should_panic(expected = "ContractPaused")]
 fn test_create_call_paused() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1004,7 +1004,7 @@ fn test_exit_early_multiple_stakers() {
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
+#[should_panic(expected = "ContractPaused")]
 fn test_exit_early_paused() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2123,7 +2123,7 @@ fn test_get_owner_returns_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Admin not set")]
+#[should_panic(expected = "AdminNotSet")]
 fn test_get_owner_before_initialize_reverts() {
     let env = Env::default();
     env.mock_all_auths();
