@@ -18,11 +18,15 @@ pub struct MockOwnerSource;
 #[contractimpl]
 impl MockOwnerSource {
     pub fn init(env: Env, owner: Address) {
-        env.storage().instance().set(&symbol_short!("OWNER"), &owner);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("OWNER"), &owner);
     }
 
     pub fn set_owner(env: Env, owner: Address) {
-        env.storage().instance().set(&symbol_short!("OWNER"), &owner);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("OWNER"), &owner);
     }
 
     pub fn get_owner(env: Env) -> Address {
