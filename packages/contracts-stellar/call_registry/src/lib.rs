@@ -404,10 +404,8 @@ impl CallRegistry {
         env.storage().persistent().set(&DataKey::IsPaused, &true);
         maybe_bump(&env, &DataKey::IsPaused);
 
-        env.events().publish(
-            (Symbol::new(&env, "Paused"), true),
-            env.ledger().sequence(),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "Paused"), true), env.ledger().sequence());
     }
 
     /// Resume state-changing entrypoints (admin only). Emits `Paused(false)` (SC-012).
@@ -416,10 +414,8 @@ impl CallRegistry {
         env.storage().persistent().set(&DataKey::IsPaused, &false);
         maybe_bump(&env, &DataKey::IsPaused);
 
-        env.events().publish(
-            (Symbol::new(&env, "Paused"), false),
-            env.ledger().sequence(),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "Paused"), false), env.ledger().sequence());
     }
 
     pub fn get_is_paused(env: Env) -> bool {

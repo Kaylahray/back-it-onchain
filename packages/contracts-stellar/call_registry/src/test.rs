@@ -2133,7 +2133,6 @@ fn test_get_owner_before_initialize_reverts() {
     client.get_owner();
 }
 
-
 // ── SC-011 Admin init & two-step handover ─────────────────────────────────────
 
 #[test]
