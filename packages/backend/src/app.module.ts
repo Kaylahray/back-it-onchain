@@ -59,7 +59,7 @@ import { HealthModule } from './health/health.module';
       },
       inject: [ConfigService],
     }),
-    EventEmitterModule.forRoot(),
+    EventEmitterModule.forRoot({ wildcard: true }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

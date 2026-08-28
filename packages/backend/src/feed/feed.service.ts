@@ -11,6 +11,7 @@ import { UserFollows } from '../users/user-follows.entity';
 export interface TrendingCall extends Call {
   trendingScore: number;
   isHot: boolean;
+  totalStake: number;
   volume24h: number;
   participantCount24h: number;
 }
@@ -59,22 +60,10 @@ export class FeedService {
   }
 
   async getForYouFeed(limit: number = 20, offset: number = 0): Promise<Call[]> {
-    // Simple algorithm: Sort by total stake (popularity) and recency
-    // For MVP, we'll just fetch recent calls.
-    // Ideally, we'd have a computed column or view for "score".
-    // Let's do a raw query to sort by total stake for now, or just standard find with order.
-
-    // Using query builder to sort by calculated total stake
-    return this.callRepository
-      .createQueryBuilder('call')
-      .leftJoinAndSelect('call.creator', 'creator')
-      .where('call.isHidden = :isHidden', { isHidden: false })
-      .addSelect('(call.totalStakeYes + call.totalStakeNo)', 'total_stake')
-      .orderBy('total_stake', 'DESC')
-      .addOrderBy('call.createdAt', 'DESC')
-      .take(limit)
-      .skip(offset)
-      .getMany();
+    // For-you feed uses the same trending score as the trending feed, so
+    // results are consistent between the two surfaces.
+    const trending = await this.calculateTrendingFeed();
+    return trending.slice(offset, offset + limit) as unknown as Call[];
   }
 
   async getTrendingFeed(
@@ -104,16 +93,35 @@ export class FeedService {
   async calculateTrendingFeed(): Promise<TrendingCall[]> {
     const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const rawRows = await this.stakeActivityRepository
-      .createQueryBuilder('activity')
-      .select('activity.callOnchainId', 'callOnchainId')
-      .addSelect('SUM(activity.amount)', 'volume24h')
-      .addSelect('COUNT(DISTINCT activity.stakerWallet)', 'participantCount24h')
-      .where('activity.createdAt >= :windowStart', { windowStart })
-      .groupBy('activity.callOnchainId')
-      .orderBy('volume24h', 'DESC')
+    const rawRows = await this.callRepository
+      .createQueryBuilder('call')
+      .select('call.id', 'callId')
+      .addSelect('call.callOnchainId', 'callOnchainId')
+      .addSelect('call.totalStakeYes + call.totalStakeNo', 'totalStake')
+      .addSelect('call.createdAt', 'createdAt')
+      .addSelect('COALESCE(SUM(activity.amount), 0)', 'volume24h')
+      .addSelect(
+        'COUNT(DISTINCT activity.stakerWallet)',
+        'participantCount24h',
+      )
+      .leftJoin(
+        StakeActivity,
+        'activity',
+        'activity.callOnchainId = call.callOnchainId ' +
+          'AND activity.createdAt >= :windowStart',
+        { windowStart },
+      )
+      .where('call.isHidden = :isHidden', { isHidden: false })
+      .groupBy('call.id')
+      .addGroupBy('call.callOnchainId')
+      .addGroupBy('call.totalStakeYes')
+      .addGroupBy('call.totalStakeNo')
+      .addGroupBy('call.createdAt')
       .getRawMany<{
+        callId: string;
         callOnchainId: string;
+        totalStake: string;
+        createdAt: string;
         volume24h: string;
         participantCount24h: string;
       }>();
@@ -122,29 +130,38 @@ export class FeedService {
       return [];
     }
 
-    const callIds = rawRows.map((r) => r.callOnchainId);
+    const callIds = rawRows.map((r) => r.callId);
     const calls = await this.callRepository.find({
-      where: { callOnchainId: In(callIds), isHidden: false },
+      where: { id: In(callIds.map(Number)), isHidden: false },
       relations: ['creator'],
     });
 
-    const callById = new Map(calls.map((call) => [call.callOnchainId, call]));
+    const callById = new Map(calls.map((call) => [call.id, call]));
 
+    const now = Date.now();
     const trending: TrendingCall[] = rawRows
       .map((row) => {
-        const targetCall = callById.get(row.callOnchainId);
+        const targetCall = callById.get(Number(row.callId));
         if (!targetCall) return null;
 
+        const totalStake = Number(row.totalStake) || 0;
         const volume = Number(row.volume24h) || 0;
         const participants = Number(row.participantCount24h) || 0;
-        const score = volume * (1 + Math.log(1 + participants));
+
+        const createdMs = new Date(row.createdAt).getTime();
+        const ageHours = Math.max((now - createdMs) / 3_600_000, 1);
+        const ageDecay = 1 + Math.log(1 + ageHours);
+
+        const score =
+          (totalStake * 0.5 + participants * 30 + volume * 0.2) / ageDecay;
 
         return {
           ...targetCall,
+          totalStake,
           volume24h: volume,
           participantCount24h: participants,
           trendingScore: Number(score.toFixed(6)),
-          isHot: score >= 1,
+          isHot: score >= 50,
         } as TrendingCall;
       })
       .filter(Boolean) as TrendingCall[];
