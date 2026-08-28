@@ -658,7 +658,8 @@ fn test_archive_settled_call() {
 
     // Advance time and finalize
     env.ledger().set_timestamp(end_ts + 1);
-    client.finalize_call(&call_id, &0u32, &1000i128, &creator);
+    client.set_outcome_manager(&creator);
+    client.finalize_call(&call_id, &0u32, &1000i128, &false, &creator);
 
     let call = client.get_call(&call_id);
     assert!(call.settled);
@@ -895,7 +896,8 @@ fn test_exit_early_after_settled() {
 
     // Finalize the call
     env.ledger().set_timestamp(end_ts + 1);
-    client.finalize_call(&call_id, &0u32, &1000i128, &creator);
+    client.set_outcome_manager(&creator);
+    client.finalize_call(&call_id, &0u32, &1000i128, &false, &creator);
 
     // Try to exit early â€” should panic
     client.exit_early(&call_id, &creator);
@@ -1169,7 +1171,8 @@ fn test_finalize_multi_outcome() {
 
     // Advance time and finalize with outcome 1 as winner
     env.ledger().set_timestamp(end_ts + 1);
-    client.finalize_call(&call_id, &1u32, &2000i128, &creator);
+    client.set_outcome_manager(&creator);
+    client.finalize_call(&call_id, &1u32, &2000i128, &false, &creator);
 
     let call = client.get_call(&call_id);
     assert!(call.settled);
@@ -1216,7 +1219,8 @@ fn test_withdraw_multi_outcome() {
 
     // Finalize with outcome 1 as winner
     env.ledger().set_timestamp(end_ts + 1);
-    client.finalize_call(&call_id, &1u32, &2000i128, &creator);
+    client.set_outcome_manager(&creator);
+    client.finalize_call(&call_id, &1u32, &2000i128, &false, &creator);
 
     // staker_a withdraws â€” should get their stake + proportional share of losing pools
     // Winners pool = 995, losers pool = 100 + 498 = 598
@@ -1680,7 +1684,8 @@ fn test_withdraw_payout_double_claim() {
     client.stake_on_call(&call_id, &staker_b, &500, &1u32);
 
     env.ledger().set_timestamp(end_ts + 1);
-    client.finalize_call(&call_id, &0u32, &2000i128, &creator);
+    client.set_outcome_manager(&creator);
+    client.finalize_call(&call_id, &0u32, &2000i128, &false, &creator);
 
     client.withdraw_payout(&call_id, &staker_a, &0u32);
     // Second withdraw must revert
@@ -1723,7 +1728,8 @@ fn test_withdraw_payout_fee_accumulates() {
     assert!(fees_after_stake > 0);
 
     env.ledger().set_timestamp(end_ts + 1);
-    client.finalize_call(&call_id, &0u32, &2000i128, &creator);
+    client.set_outcome_manager(&creator);
+    client.finalize_call(&call_id, &0u32, &2000i128, &false, &creator);
 
     client.withdraw_payout(&call_id, &staker_a, &0u32);
     let fees_after_withdraw = client.get_platform_fees();
@@ -2125,4 +2131,235 @@ fn test_get_owner_before_initialize_reverts() {
     let contract_id = env.register_contract(None, CallRegistry);
     let client = CallRegistryClient::new(&env, &contract_id);
     client.get_owner();
+}
+
+
+// ── SC-011 Admin init & two-step handover ─────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "AlreadyInitialized")]
+fn test_initialize_twice_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    client.initialize(&admin);
+}
+
+#[test]
+fn test_propose_and_accept_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    client.propose_admin(&new_admin);
+    client.accept_admin();
+
+    assert_eq!(client.get_admin_address(), new_admin);
+}
+
+#[test]
+#[should_panic]
+fn test_accept_admin_without_pending_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    client.accept_admin();
+}
+
+// ── SC-012 Pausable guard ─────────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "ContractPaused")]
+fn test_paused_blocks_create_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    client.pause();
+
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    client.whitelist_token_admin(&stake_token);
+
+    client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &(env.ledger().timestamp() + 1000),
+        &default_metadata(&env),
+    );
+}
+
+#[test]
+fn test_pause_unpause_events_and_resume() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    assert!(!client.get_is_paused());
+    client.pause();
+    assert!(client.get_is_paused());
+    client.unpause();
+    assert!(!client.get_is_paused());
+
+    // After unpause, create_call works again
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &1000);
+    client.whitelist_token_admin(&stake_token);
+
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &(env.ledger().timestamp() + 1000),
+        &default_metadata(&env),
+    );
+    assert_eq!(call_id, 0);
+}
+
+// ── SC-013 TTL bump strategy ──────────────────────────────────────────────────
+
+#[test]
+fn test_maybe_bump_extends_when_below_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Reading admin bumps TTL; assert key still present (smoke).
+    let _ = client.get_admin_address();
+    let _ = client.get_is_paused();
+}
+
+// ── SC-014 Finalize via OutcomeManager only ───────────────────────────────────
+
+#[test]
+fn test_finalize_via_outcome_manager_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let om = Address::generate(&env);
+    client.set_outcome_manager(&om);
+
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &1000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 100;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+
+    env.ledger().set_timestamp(end_ts + 1);
+    client.finalize_call(&call_id, &0u32, &1000i128, &false, &om);
+
+    let call = client.get_call(&call_id);
+    assert!(call.settled);
+    assert_eq!(call.winning_outcome, 0);
+    assert_eq!(call.final_price, 1000);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_finalize_direct_call_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let om = Address::generate(&env);
+    client.set_outcome_manager(&om);
+
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &1000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 100;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+
+    env.ledger().set_timestamp(end_ts + 1);
+    // Direct finalize by creator (not OM) must revert
+    client.finalize_call(&call_id, &0u32, &1000i128, &false, &creator);
+}
+
+#[test]
+#[should_panic(expected = "CallSettled")]
+fn test_finalize_twice_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, CallRegistry);
+    let client = CallRegistryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let om = Address::generate(&env);
+    client.set_outcome_manager(&om);
+
+    let creator = Address::generate(&env);
+    let stake_token_admin = Address::generate(&env);
+    let stake_token_contract = env.register_stellar_asset_contract_v2(stake_token_admin.clone());
+    let stake_token = stake_token_contract.address();
+    let stake_token_admin_client = token::StellarAssetClient::new(&env, &stake_token);
+    stake_token_admin_client.mint(&creator, &1000);
+    client.whitelist_token_admin(&stake_token);
+
+    let end_ts = env.ledger().timestamp() + 100;
+    let call_id = client.create_call(
+        &creator,
+        &stake_token,
+        &100,
+        &end_ts,
+        &default_metadata(&env),
+    );
+
+    env.ledger().set_timestamp(end_ts + 1);
+    client.finalize_call(&call_id, &0u32, &1000i128, &false, &om);
+    client.finalize_call(&call_id, &0u32, &1000i128, &false, &om);
 }

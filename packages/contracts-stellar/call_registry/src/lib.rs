@@ -94,7 +94,11 @@ pub enum DataKey {
     /// User stake: (call_id, user_address, outcome_index)
     UserStake(u64, Address, u32),
     Admin,
+    /// Pending admin for two-step ownership handover (SC-011).
+    PendingAdmin,
     IsPaused,
+    /// Authorized OutcomeManager contract address (SC-014).
+    OutcomeManager,
     /// Optional vault contract address (set by admin).
     VaultContract,
     /// Accumulated platform fees available for dividend distribution.
@@ -140,13 +144,26 @@ pub fn compute_fee_basis_points(participant_count: u32) -> i128 {
 
 // ── TTL helper (issue #169) ───────────────────────────────────────────────────
 
-/// Extend a persistent-storage key's TTL to 1 year if it falls below the
-/// 30-day threshold.  Call this on every meaningful write to ensure data
-/// is retained for 1 year from the most-recent interaction.
+/// Extend a persistent-storage key's TTL to 1 year if remaining TTL is below
+/// the 30-day threshold (SC-013). No-op when remaining TTL is already healthy.
+///
+/// Uses `get_ttl` when the key exists; always safe to call on every read/write path.
+fn maybe_bump(env: &Env, key: &DataKey) {
+    let storage = env.storage().persistent();
+    if !storage.has(key) {
+        return;
+    }
+    // Remaining live ledgers for this entry. If already above threshold, skip.
+    let remaining = storage.get_ttl(key);
+    if remaining >= TTL_THRESHOLD {
+        return;
+    }
+    storage.extend_ttl(key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
+}
+
+/// Backwards-compatible alias used by existing call sites.
 fn bump_persistent_ttl(env: &Env, key: &DataKey) {
-    env.storage()
-        .persistent()
-        .extend_ttl(key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
+    maybe_bump(env, key);
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -160,7 +177,7 @@ impl CallRegistry {
         env.storage()
             .persistent()
             .get(&DataKey::Admin)
-            .expect("Admin not set")
+            .unwrap_or_else(|| panic!("{:?}", ContractError::AdminNotSet))
     }
 
     fn is_paused(env: &Env) -> bool {
@@ -172,8 +189,16 @@ impl CallRegistry {
 
     fn assert_not_paused(env: &Env) {
         if Self::is_paused(env) {
-            panic!("Contract is paused");
+            // ContractError::ContractPaused = 2 (SC-012 acceptance)
+            panic!("{:?}", ContractError::ContractPaused);
         }
+    }
+
+    fn require_admin_auth(env: &Env) -> Address {
+        let admin = Self::get_admin(env);
+        admin.require_auth();
+        maybe_bump(env, &DataKey::Admin);
+        admin
     }
 
     // ── Token whitelist helpers (issue #170) ──────────────────────────────────
@@ -297,39 +322,114 @@ impl CallRegistry {
 
     // ── Admin ─────────────────────────────────────────────────────────────────
 
-    /// Initialize admin and pause state.
+    /// One-time admin + pause-state initialization (SC-011).
+    /// Reverts with `AlreadyInitialized` if `Admin` is already set.
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().persistent().has(&DataKey::Admin) {
-            panic!("Already initialized");
+            panic!("{:?}", ContractError::AlreadyInitialized);
         }
         admin.require_auth();
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::IsPaused, &false);
+        maybe_bump(&env, &DataKey::Admin);
+        maybe_bump(&env, &DataKey::IsPaused);
+
+        env.events().publish(
+            (Symbol::new(&env, "AdminChanged"), admin.clone()),
+            (env.ledger().sequence(), true),
+        );
+    }
+
+    /// Propose a new admin (current admin only). Completes via `accept_admin` (SC-011).
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        let admin = Self::require_admin_auth(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        maybe_bump(&env, &DataKey::PendingAdmin);
+
+        env.events().publish(
+            (Symbol::new(&env, "AdminProposed"), admin, new_admin),
+            env.ledger().sequence(),
+        );
+    }
+
+    /// Accept a pending admin proposal. Only the proposed address may accept (SC-011).
+    pub fn accept_admin(env: Env) {
+        let pending: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic!("{:?}", ContractError::NoPendingOwner));
+        pending.require_auth();
+
+        let old_admin: Address = Self::get_admin(&env);
+        env.storage().persistent().set(&DataKey::Admin, &pending);
+        env.storage().persistent().remove(&DataKey::PendingAdmin);
+        maybe_bump(&env, &DataKey::Admin);
+
+        env.events().publish(
+            (Symbol::new(&env, "AdminChanged"), old_admin, pending),
+            env.ledger().sequence(),
+        );
+    }
+
+    /// Set the OutcomeManager contract authorized to finalize calls (SC-014).
+    pub fn set_outcome_manager(env: Env, manager: Address) {
+        let _admin = Self::require_admin_auth(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::OutcomeManager, &manager);
+        maybe_bump(&env, &DataKey::OutcomeManager);
+    }
+
+    pub fn get_outcome_manager(env: Env) -> Option<Address> {
+        let key = DataKey::OutcomeManager;
+        maybe_bump(&env, &key);
+        env.storage().persistent().get(&key)
     }
 
     /// Set (or clear) the vault contract address (admin only).
     pub fn set_vault(env: Env, vault: Address) {
-        let admin = Self::get_admin(&env);
-        admin.require_auth();
+        let _admin = Self::require_admin_auth(&env);
         env.storage()
             .persistent()
             .set(&DataKey::VaultContract, &vault);
+        maybe_bump(&env, &DataKey::VaultContract);
     }
 
+    /// Pause all state-changing entrypoints (admin only). Emits `Paused(true)` (SC-012).
     pub fn pause(env: Env) {
-        let admin = Self::get_admin(&env);
-        admin.require_auth();
+        let _admin = Self::require_admin_auth(&env);
         env.storage().persistent().set(&DataKey::IsPaused, &true);
+        maybe_bump(&env, &DataKey::IsPaused);
+
+        env.events().publish(
+            (Symbol::new(&env, "Paused"), true),
+            env.ledger().sequence(),
+        );
     }
 
+    /// Resume state-changing entrypoints (admin only). Emits `Paused(false)` (SC-012).
     pub fn unpause(env: Env) {
-        let admin = Self::get_admin(&env);
-        admin.require_auth();
+        let _admin = Self::require_admin_auth(&env);
         env.storage().persistent().set(&DataKey::IsPaused, &false);
+        maybe_bump(&env, &DataKey::IsPaused);
+
+        env.events().publish(
+            (Symbol::new(&env, "Paused"), false),
+            env.ledger().sequence(),
+        );
     }
 
     pub fn get_is_paused(env: Env) -> bool {
+        maybe_bump(&env, &DataKey::IsPaused);
         Self::is_paused(&env)
+    }
+
+    pub fn get_admin_address(env: Env) -> Address {
+        maybe_bump(&env, &DataKey::Admin);
+        Self::get_admin(&env)
     }
 
     // ── Authorized staker management (issue #170) ─────────────────────────────
@@ -1090,33 +1190,54 @@ impl CallRegistry {
 
     /// Finalize a call. Deducts a gas fee from the losers' pools.
     /// `winning_outcome` is the 0-based index of the winning outcome.
+    /// Finalize a call with the winning outcome (SC-014).
+    ///
+    /// Only the configured OutcomeManager contract may call this. Direct calls
+    /// from EOAs or other contracts revert with `Unauthorized`. Re-finalization
+    /// is blocked by the `settled` flag (`CallSettled`).
+    ///
+    /// When `vault_rebalance` is true, remaining vault deposits are withdrawn
+    /// so yield is realized before settlement is marked complete.
     pub fn finalize_call(
         env: Env,
         call_id: u64,
         winning_outcome: u32,
         final_price: i128,
+        vault_rebalance: bool,
         caller: Address,
     ) {
+        Self::assert_not_paused(&env);
         caller.require_auth();
+
+        // Cross-contract auth: caller must be the registered OutcomeManager.
+        let om: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OutcomeManager)
+            .unwrap_or_else(|| panic!("{:?}", ContractError::Unauthorized));
+        if caller != om {
+            panic!("{:?}", ContractError::Unauthorized);
+        }
+        maybe_bump(&env, &DataKey::OutcomeManager);
 
         let key = DataKey::Call(call_id);
         let mut call: Call = env
             .storage()
             .persistent()
             .get(&key)
-            .expect("Call does not exist");
+            .unwrap_or_else(|| panic!("{:?}", ContractError::CallNotFound));
 
         if call.settled {
-            panic!("Call settled");
+            panic!("{:?}", ContractError::CallSettled);
         }
         if env.ledger().timestamp() < call.end_ts {
-            panic!("Call not yet ended");
+            panic!("{:?}", ContractError::CallNotEnded);
         }
         if winning_outcome >= call.outcome_pools.len() as u32 {
-            panic!("Invalid winning outcome");
+            panic!("{:?}", ContractError::InvalidWinningOutcome);
         }
 
-        // Sum all losing pools
+        // Sum all losing pools for gas fee
         let mut losers_pool: i128 = 0;
         for i in 0..call.outcome_pools.len() {
             if i as u32 != winning_outcome {
@@ -1127,27 +1248,38 @@ impl CallRegistry {
         let gas_fee = losers_pool * 5 / 1000;
 
         if gas_fee > 0 {
-            // Withdraw gas fee from vault before paying caller
             Self::vault_withdraw(&env, gas_fee);
-            call.vault_balance -= gas_fee;
+            call.vault_balance = call
+                .vault_balance
+                .checked_sub(gas_fee)
+                .unwrap_or_else(|| panic!("{:?}", ContractError::ArithmeticOverflow));
             let token_client = token::Client::new(&env, &call.stake_token);
             token_client.transfer(&env.current_contract_address(), &caller, &gas_fee);
+        }
+
+        // Optionally realize remaining vault yield before settlement.
+        if vault_rebalance && call.vault_balance > 0 {
+            let bal = call.vault_balance;
+            Self::vault_withdraw(&env, bal);
+            call.vault_balance = 0;
         }
 
         call.settled = true;
         call.winning_outcome = winning_outcome;
         call.final_price = final_price;
         env.storage().persistent().set(&key, &call);
+        maybe_bump(&env, &key);
 
+        // Redundant event payload: vault_balance + settled flag (SC-014).
         env.events().publish(
             (Symbol::new(&env, "CallFinalized"), call_id, caller),
             (
                 winning_outcome,
                 final_price,
                 gas_fee,
-                call.vault_balance,   // New vault balance
-                call.settled,         // Settlement state
-                call.winning_outcome, // Winning outcome index
+                call.vault_balance,
+                call.settled,
+                call.winning_outcome,
             ),
         );
     }
