@@ -24,28 +24,26 @@ export const validationSchema = Joi.object({
   DB_HOST: Joi.string().default('localhost'),
   DB_PORT: Joi.number().port().default(5432),
   DB_USERNAME: Joi.string().default('postgres'),
-  DB_PASSWORD: Joi.string()
-    .when('NODE_ENV', {
-      is: 'production',
-      then: Joi.string().required().messages({
-        'any.required': 'DB_PASSWORD is required in production',
-      }),
-      otherwise: Joi.string().default('postgres'),
+  DB_PASSWORD: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().required().messages({
+      'any.required': 'DB_PASSWORD is required in production',
     }),
+    otherwise: Joi.string().default('postgres'),
+  }),
   DB_DATABASE: Joi.string().default('back_it_onchain'),
   // Aliases used by data-source.ts (TypeORM CLI)
   DB_NAME: Joi.string().optional(),
 
   // ── Authentication (JWT) ────────────────────────────────────────────────
-  JWT_SECRET: Joi.string()
-    .when('NODE_ENV', {
-      is: 'production',
-      then: Joi.string().min(32).required().messages({
-        'any.required': 'JWT_SECRET is required in production',
-        'string.min': 'JWT_SECRET must be at least 32 characters in production',
-      }),
-      otherwise: Joi.string().default('dev-secret'),
+  JWT_SECRET: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().min(32).required().messages({
+      'any.required': 'JWT_SECRET is required in production',
+      'string.min': 'JWT_SECRET must be at least 32 characters in production',
     }),
+    otherwise: Joi.string().default('dev-secret'),
+  }),
 
   // ── Oracle — EVM (Base) ────────────────────────────────────────────────
   ORACLE_PRIVATE_KEY: Joi.string()
@@ -117,6 +115,10 @@ export const validationSchema = Joi.object({
   SOROBAN_RPC_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .optional(),
+  STELLAR_OUTCOME_MANAGER_CONTRACT_ID: Joi.string().optional().messages({
+    'string.base':
+      'STELLAR_OUTCOME_MANAGER_CONTRACT_ID must be a valid Stellar contract address (C...)',
+  }),
 
   // ── Redis (optional — falls back to in-memory cache) ────────────────────
   REDIS_URL: Joi.string()

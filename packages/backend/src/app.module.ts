@@ -39,6 +39,7 @@ import { GatewaysModule } from './gateways/gateways.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
 import { TokensModule } from './tokens/tokens.module';
+import { RelayerModule } from './indexer/relayer.module';
 
 @Module({
   imports: [
@@ -134,6 +135,7 @@ import { TokensModule } from './tokens/tokens.module';
     AdminModule,
     HealthModule,
     TokensModule,
+    RelayerModule,
   ],
   controllers: [AppController],
   providers: [
