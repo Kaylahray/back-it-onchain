@@ -1,11 +1,26 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { DataSource } from 'typeorm';
+import { stringify } from 'csv-stringify/sync';
 import { PriceHistoryPeriod } from './dto/price-history-query.dto';
+import { AnalyticsChainFilter } from './dto/overview-query.dto';
 import {
   computeReputationScore,
   ReputationCallInput,
 } from './reputation.util';
+
+export interface PlatformOverview {
+  totalCalls: number;
+  totalVolume: number;
+  activeUsers24h: number;
+  activeUsers7d: number;
+  winRateDistribution: {
+    wins: number;
+    losses: number;
+    pending: number;
+    winRatePercent: number;
+  };
+}
 
 // [timestamp_ms, close_price]
 export type PriceCandle = [number, number];
@@ -57,6 +72,7 @@ const PERIOD_LIMIT: Record<PriceHistoryPeriod, number> = {
 };
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const OVERVIEW_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 @Injectable()
 export class AnalyticsService {
@@ -66,6 +82,114 @@ export class AnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * BE-29 — platform-wide metrics: total calls, total stake volume, active
+   * users (24h/7d), and the win/loss/pending distribution. Cached 2 minutes,
+   * optionally scoped to a single chain.
+   */
+  async getOverview(chain?: AnalyticsChainFilter): Promise<PlatformOverview> {
+    const cacheKey = `analytics:overview:${chain ?? 'all'}`;
+    const cached = await this.cache.get<PlatformOverview>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit: ${cacheKey}`);
+      return cached;
+    }
+
+    const chainClause = chain ? 'WHERE c.chain = $1' : '';
+    const chainParams = chain ? [chain] : [];
+
+    const [totals] = await this.dataSource.query(
+      `
+      SELECT
+        COUNT(*)::int AS "totalCalls",
+        COALESCE(SUM(c."totalStakeYes" + c."totalStakeNo"), 0)::float AS "totalVolume",
+        COUNT(*) FILTER (WHERE c.outcome = true)::int AS wins,
+        COUNT(*) FILTER (WHERE c.outcome = false)::int AS losses,
+        COUNT(*) FILTER (WHERE c.outcome IS NULL)::int AS pending
+      FROM "call" c
+      ${chainClause}
+      `,
+      chainParams,
+    );
+
+    const [activeUsers24h, activeUsers7d] = await Promise.all([
+      this.countActiveUsers(1, chain),
+      this.countActiveUsers(7, chain),
+    ]);
+
+    const resolved = totals.wins + totals.losses;
+    const winRatePercent =
+      resolved > 0 ? Math.round((totals.wins / resolved) * 10000) / 100 : 0;
+
+    const overview: PlatformOverview = {
+      totalCalls: totals.totalCalls,
+      totalVolume: totals.totalVolume,
+      activeUsers24h,
+      activeUsers7d,
+      winRateDistribution: {
+        wins: totals.wins,
+        losses: totals.losses,
+        pending: totals.pending,
+        winRatePercent,
+      },
+    };
+
+    await this.cache.set(cacheKey, overview, OVERVIEW_CACHE_TTL_MS);
+    return overview;
+  }
+
+  /** Flattens a PlatformOverview into a single-row CSV via csv-stringify. */
+  overviewToCsv(overview: PlatformOverview): string {
+    return stringify(
+      [
+        {
+          totalCalls: overview.totalCalls,
+          totalVolume: overview.totalVolume,
+          activeUsers24h: overview.activeUsers24h,
+          activeUsers7d: overview.activeUsers7d,
+          wins: overview.winRateDistribution.wins,
+          losses: overview.winRateDistribution.losses,
+          pending: overview.winRateDistribution.pending,
+          winRatePercent: overview.winRateDistribution.winRatePercent,
+        },
+      ],
+      { header: true },
+    );
+  }
+
+  /**
+   * Distinct wallets that either created a call or staked on one in the
+   * last `days` days — the union of both is our definition of "active".
+   */
+  private async countActiveUsers(
+    days: number,
+    chain?: AnalyticsChainFilter,
+  ): Promise<number> {
+    const chainCreatorClause = chain ? 'AND c."chain" = $1' : '';
+    const chainStakerClause = chain ? 'AND c2."chain" = $1' : '';
+    const params = chain ? [chain] : [];
+
+    const [{ count }] = await this.dataSource.query(
+      `
+      SELECT COUNT(DISTINCT wallet)::int AS count FROM (
+        SELECT c."creatorWallet" AS wallet
+        FROM "call" c
+        WHERE c."createdAt" >= NOW() - INTERVAL '${days} days'
+          ${chainCreatorClause}
+        UNION
+        SELECT sa."stakerWallet" AS wallet
+        FROM "stake_activity" sa
+        JOIN "call" c2 ON c2."callOnchainId" = sa."callOnchainId"
+        WHERE sa."createdAt" >= NOW() - INTERVAL '${days} days'
+          ${chainStakerClause}
+      ) AS active_wallets
+      `,
+      params,
+    );
+
+    return count;
+  }
 
   async getPriceHistory(
     tokenAddress: string,

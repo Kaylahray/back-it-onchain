@@ -4,14 +4,20 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Patch,
   Post,
+  Query,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { AdminService } from './admin.service';
+import { CallsService } from '../calls/calls.service';
 import { PaymasterPolicyService } from '../oracle/paymaster-policy.service';
 import { PaymasterBudgetSnapshot } from '../oracle/paymaster-policy.service';
+import { AuditLogService } from '../oracle/audit-log.service';
+import { AuditLog } from '../oracle/audit-log.entity';
 
 class CircuitBreakerDto {
   paused!: boolean;
@@ -26,16 +32,14 @@ class ResetBudgetDto {
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
+    private readonly callsService: CallsService,
     private readonly paymasterPolicyService: PaymasterPolicyService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /**
    * PATCH /admin/circuit-breaker
-   *
    * Toggle the protocol-wide circuit breaker.
-   * Requires `x-admin-api-key` header matching the `ADMIN_API_KEY` env var.
-   *
-   * Body: { "paused": true | false }
    */
   @Patch('circuit-breaker')
   @HttpCode(HttpStatus.OK)
@@ -43,6 +47,20 @@ export class AdminController {
     @Body() body: CircuitBreakerDto,
   ): Promise<{ isPaused: boolean; updatedAt: Date }> {
     return this.adminService.setCircuitBreaker(Boolean(body.paused));
+  }
+
+  /**
+   * POST /admin/disputes/:id/resolve
+   * Resolve an open dispute. Body: { upheld: boolean }
+   */
+  @Post('disputes/:id/resolve')
+  resolveDispute(
+    @Param('id') id: string,
+    @Body('upheld') upheld: boolean,
+    @Request() req: any,
+  ) {
+    const adminWallet: string = req.headers['x-admin-wallet'] ?? 'admin';
+    return this.callsService.resolveDispute(id, adminWallet, Boolean(upheld));
   }
 
   /**
@@ -72,5 +90,16 @@ export class AdminController {
   ): Promise<{ resets: string }> {
     await this.paymasterPolicyService.resetBudget(body.address);
     return { resets: body.address ?? 'all' };
+  }
+
+  /**
+   * GET /admin/audit?callId=<optional>
+   * Returns immutable audit log entries, optionally filtered by callId.
+   */
+  @Get('audit')
+  async getAuditLogs(
+    @Query('callId') callId?: string,
+  ): Promise<AuditLog[]> {
+    return this.auditLogService.query(callId);
   }
 }

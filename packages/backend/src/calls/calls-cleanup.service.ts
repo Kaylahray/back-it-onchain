@@ -1,9 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, In } from 'typeorm';
+import { Repository, LessThan, IsNull } from 'typeorm';
 import { Call } from './call.entity';
 import { ConfigService } from '@nestjs/config';
+
+/** Chunk size for batched deletes to avoid long-running transactions. */
+const CHUNK_SIZE = 100;
 
 @Injectable()
 export class CallsCleanupService {
@@ -11,66 +14,53 @@ export class CallsCleanupService {
 
   constructor(
     @InjectRepository(Call)
-    private readonly callsRepository: Repository<Call>,
+    private readonly callsRepo: Repository<Call>,
     private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * Deletes OPEN draft calls that have no onchain ID and are older than 7 days.
+   * Runs daily at midnight with a small random jitter to spread DB load.
+   */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-  async handleAbandonedCallsCleanup() {
-    this.logger.log('Starting abandoned calls cleanup cron job...');
+  async handleDraftCallsCleanup(): Promise<void> {
+    const dryRun = this.configService.get<boolean>('CLEANUP_DRY_RUN', false);
 
-    const thresholdDate = new Date();
-    thresholdDate.setHours(thresholdDate.getHours() - 48);
+    // Small jitter: spread execution up to 30 s to avoid thundering-herd on multi-instance deploys
+    const jitterMs = Math.floor(Math.random() * 30_000);
+    await new Promise((r) => setTimeout(r, jitterMs));
 
-    const staleCalls = await this.callsRepository.find({
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+
+    const stale = await this.callsRepo.find({
       where: {
-        status: In(['OPEN', 'SETTLING']),
-        endTs: LessThan(thresholdDate),
+        status: 'OPEN',
+        callOnchainId: IsNull(),
+        createdAt: LessThan(cutoff),
       },
+      select: ['id'],
     });
 
-    if (staleCalls.length === 0) {
-      this.logger.log('No abandoned calls found.');
+    if (stale.length === 0) {
+      this.logger.log('CallsCleanup: no stale OPEN drafts found');
       return;
     }
 
     this.logger.log(
-      `Found ${staleCalls.length} abandoned calls. Marking as UNRESOLVED.`,
+      `CallsCleanup: found ${stale.length} stale OPEN drafts older than 7d${dryRun ? ' [DRY RUN]' : ''}`,
     );
 
-    for (const call of staleCalls) {
-      call.status = 'UNRESOLVED';
-      await this.callsRepository.save(call);
+    if (dryRun) return;
 
-      await this.notifyAdmin(call);
+    // Delete in chunks
+    const ids = stale.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      await this.callsRepo.delete(chunk);
+      this.logger.debug(`CallsCleanup: deleted chunk ${i / CHUNK_SIZE + 1} (${chunk.length} rows)`);
     }
 
-    this.logger.log('Abandoned calls cleanup completed.');
-  }
-
-  private async notifyAdmin(call: Call) {
-    const discordWebhookUrl = this.configService.get<string>(
-      'DISCORD_ADMIN_WEBHOOK_URL',
-    );
-    const message = `🚨 **Manual Intervention Required** 🚨\nCall ID: ${call.id} (Title: ${call.title || 'N/A'}) has been marked as **UNRESOLVED** due to inactivity past its end time (${call.endTs}).`;
-
-    if (discordWebhookUrl) {
-      try {
-        await fetch(discordWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: message }),
-        });
-      } catch (error) {
-        this.logger.error(
-          `Failed to send Discord notification for call ${call.id}: ${error.message}`,
-        );
-      }
-    } else {
-      this.logger.warn(
-        `No Discord webhook URL configured. Manual intervention required for call ${call.id}.`,
-      );
-      this.logger.warn(message);
-    }
+    this.logger.log(`CallsCleanup: deleted ${ids.length} stale OPEN draft calls`);
   }
 }
