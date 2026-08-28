@@ -4,13 +4,16 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Patch,
   Post,
   Query,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { AdminService } from './admin.service';
+import { CallsService } from '../calls/calls.service';
 import { PaymasterPolicyService } from '../oracle/paymaster-policy.service';
 import { PaymasterBudgetSnapshot } from '../oracle/paymaster-policy.service';
 import { AuditLogService } from '../oracle/audit-log.service';
@@ -29,6 +32,7 @@ class ResetBudgetDto {
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
+    private readonly callsService: CallsService,
     private readonly paymasterPolicyService: PaymasterPolicyService,
     private readonly auditLogService: AuditLogService,
   ) {}
@@ -43,6 +47,20 @@ export class AdminController {
     @Body() body: CircuitBreakerDto,
   ): Promise<{ isPaused: boolean; updatedAt: Date }> {
     return this.adminService.setCircuitBreaker(Boolean(body.paused));
+  }
+
+  /**
+   * POST /admin/disputes/:id/resolve
+   * Resolve an open dispute. Body: { upheld: boolean }
+   */
+  @Post('disputes/:id/resolve')
+  resolveDispute(
+    @Param('id') id: string,
+    @Body('upheld') upheld: boolean,
+    @Request() req: any,
+  ) {
+    const adminWallet: string = req.headers['x-admin-wallet'] ?? 'admin';
+    return this.callsService.resolveDispute(id, adminWallet, Boolean(upheld));
   }
 
   /**

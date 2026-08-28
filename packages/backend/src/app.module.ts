@@ -14,7 +14,9 @@ import { validationSchema } from './config/env.validation';
 
 import { User } from './users/user.entity';
 import { Call } from './calls/call.entity';
+import { Participant } from './calls/participant.entity';
 import { StakeActivity } from './calls/stake-activity.entity';
+import { Dispute } from './calls/dispute.entity';
 import { AuthModule } from './auth/auth.module';
 import { CallsModule } from './calls/calls.module';
 import { OracleModule } from './oracle/oracle.module';
@@ -36,6 +38,7 @@ import { AuditLog } from './oracle/audit-log.entity';
 import { GatewaysModule } from './gateways/gateways.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
+import { TokensModule } from './tokens/tokens.module';
 
 @Module({
   imports: [
@@ -76,7 +79,9 @@ import { HealthModule } from './health/health.module';
         entities: [
           User,
           Call,
+          Participant,
           StakeActivity,
+          Dispute,
           UserFollows,
           UserSettings,
           Notification,
@@ -128,6 +133,7 @@ import { HealthModule } from './health/health.module';
     GatewaysModule,
     AdminModule,
     HealthModule,
+    TokensModule,
   ],
   controllers: [AppController],
   providers: [

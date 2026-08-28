@@ -8,9 +8,10 @@ import {
   Request,
   UseGuards,
   ServiceUnavailableException,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { CallsService } from './calls.service';
+import { CallsService, CallStatus } from './calls.service';
 import { Call } from './call.entity';
 import { AdminService } from '../admin/admin.service';
 import { CallsQueryDto } from './dto/calls-query.dto';
@@ -51,8 +52,7 @@ export class CallsController {
     @Body('reason') reason: string,
     @Request() req: any,
   ) {
-    const wallet: string = req.user.wallet;
-    return this.callsService.report(+id, reason, wallet);
+    return this.callsService.report(+id, reason, req.user.wallet);
   }
 
   @Throttle({ default: { limit: 10, ttl: 1 * 60000 } })
@@ -64,5 +64,45 @@ export class CallsController {
   @Get('ipfs/:cid')
   getIpfs(@Param('cid') cid: string) {
     return this.callsService.getIpfs(cid);
+  }
+
+  // ── Issue #300: lifecycle transition ──────────────────────────────────────
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/status')
+  updateStatus(
+    @Param('id') id: string,
+    @Body('status') status: CallStatus,
+    @Body('outcome') outcome: boolean | undefined,
+    @Body('adminForce') adminForce: boolean | undefined,
+  ) {
+    return this.callsService.updateStatus(+id, status, { outcome, adminForce });
+  }
+
+  // ── Issue #301: payout aggregation ────────────────────────────────────────
+
+  @Get(':id/payouts')
+  getPayouts(
+    @Param('id') id: string,
+    @Query('feeBps', new ParseIntPipe({ optional: true })) feeBps?: number,
+  ) {
+    return this.callsService.calculatePayouts(+id, feeBps);
+  }
+
+  // ── Issue #302: dispute endpoints ─────────────────────────────────────────
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/dispute')
+  raiseDispute(
+    @Param('id') id: string,
+    @Body('bondAmount') bondAmount: number,
+    @Request() req: any,
+  ) {
+    return this.callsService.raiseDispute(+id, req.user.wallet, bondAmount);
+  }
+
+  @Get(':id/disputes')
+  getDisputes(@Param('id') id: string) {
+    return this.callsService.findDisputesByCall(+id);
   }
 }
