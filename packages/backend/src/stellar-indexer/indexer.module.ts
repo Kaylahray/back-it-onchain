@@ -5,6 +5,7 @@ import { StakeActivity } from '../calls/stake-activity.entity';
 import { StellarIndexerService } from './services/stellar-indexer.service';
 import { BaseIndexerService } from './services/base-indexer.service';
 import { MultiChainIndexerService } from './services/multi-chain-indexer.service';
+import { LedgerCheckpointService } from './services/ledger-checkpoint.service';
 import { IndexerController } from './controllers/indexer.controller';
 
 @Module({
@@ -13,12 +14,14 @@ import { IndexerController } from './controllers/indexer.controller';
     StellarIndexerService,
     BaseIndexerService,
     MultiChainIndexerService,
+    LedgerCheckpointService,
   ],
   controllers: [IndexerController],
   exports: [
     StellarIndexerService,
     BaseIndexerService,
     MultiChainIndexerService,
+    LedgerCheckpointService,
   ],
 })
 export class IndexerModule {}
