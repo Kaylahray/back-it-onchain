@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,8 @@ import { AdminService } from './admin.service';
 import { CallsService } from '../calls/calls.service';
 import { PaymasterPolicyService } from '../oracle/paymaster-policy.service';
 import { PaymasterBudgetSnapshot } from '../oracle/paymaster-policy.service';
+import { AuditLogService } from '../oracle/audit-log.service';
+import { AuditLog } from '../oracle/audit-log.entity';
 
 class CircuitBreakerDto {
   paused!: boolean;
@@ -31,6 +34,7 @@ export class AdminController {
     private readonly adminService: AdminService,
     private readonly callsService: CallsService,
     private readonly paymasterPolicyService: PaymasterPolicyService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /**
@@ -86,5 +90,16 @@ export class AdminController {
   ): Promise<{ resets: string }> {
     await this.paymasterPolicyService.resetBudget(body.address);
     return { resets: body.address ?? 'all' };
+  }
+
+  /**
+   * GET /admin/audit?callId=<optional>
+   * Returns immutable audit log entries, optionally filtered by callId.
+   */
+  @Get('audit')
+  async getAuditLogs(
+    @Query('callId') callId?: string,
+  ): Promise<AuditLog[]> {
+    return this.auditLogService.query(callId);
   }
 }
