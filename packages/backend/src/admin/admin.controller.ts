@@ -57,6 +57,9 @@ export class AdminController {
   ) {
     const adminWallet: string = req.headers['x-admin-wallet'] ?? 'admin';
     return this.callsService.resolveDispute(id, adminWallet, Boolean(upheld));
+  }
+
+  /**
    * GET /admin/paymaster/budget
    *
    * Returns the paymaster budget snapshot: per-address caps, global daily
