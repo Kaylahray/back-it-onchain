@@ -1,34 +1,45 @@
-export interface ReputationInput {
-  totalResolvedCalls: number;
-  winCount: number;
+/**
+ * Reputation engine.
+ *
+ * A user's reputation is the running sum of per-resolution contributions:
+ *
+ *   score = Σ (outcomeCorrect ? +1 : -1) * stakeWeight * timeDecay
+ *
+ *   - outcomeCorrect : whether the user's call/outcome matched the result
+ *   - stakeWeight    : larger stakes weigh more: 1 + ln(1 + stake)
+ *   - timeDecay      : exponential half-life of 30 days (recent results count
+ *                      more): 0.5 ^ (ageDays / 30)
+ *
+ * Draws / UNRESOLVED outcomes (outcome === null) contribute nothing.
+ */
+
+const HALF_LIFE_DAYS = 30;
+
+export interface ReputationCallInput {
+  /** Resolved outcome. `null` means a draw / UNRESOLVED -> no contribution. */
+  outcome: boolean | null;
+  /** Stake size used to weight the contribution. */
+  stakeAmount: number;
+  /** Resolution timestamp used for time decay. */
+  resolvedAt: Date;
 }
 
-const CONFIDENCE_THRESHOLDS = [
-  { min: 0, multiplier: 0.15 },
-  { min: 5, multiplier: 0.4 },
-  { min: 10, multiplier: 0.65 },
-  { min: 25, multiplier: 0.85 },
-  { min: 50, multiplier: 1.0 },
-];
+export function stakeWeight(stakeAmount: number): number {
+  return 1 + Math.log1p(Math.max(stakeAmount, 0));
+}
 
-function getConfidenceMultiplier(totalResolved: number): number {
-  let multiplier = CONFIDENCE_THRESHOLDS[0].multiplier;
-  for (const tier of CONFIDENCE_THRESHOLDS) {
-    if (totalResolved >= tier.min) {
-      multiplier = tier.multiplier;
-    }
+export function timeDecay(resolvedAt: Date, now = Date.now()): number {
+  const ageDays = Math.max(0, (now - resolvedAt.getTime()) / 86_400_000);
+  return Math.pow(0.5, ageDays / HALF_LIFE_DAYS);
+}
+
+export function computeReputationScore(calls: ReputationCallInput[]): number {
+  let score = 0;
+  for (const call of calls) {
+    if (call.outcome === null || call.outcome === undefined) continue;
+    const correct = call.outcome ? 1 : -1;
+    score +=
+      correct * stakeWeight(call.stakeAmount) * timeDecay(call.resolvedAt);
   }
-  return multiplier;
-}
-
-export function computeReputationScore(input: ReputationInput): number {
-  const { totalResolvedCalls, winCount } = input;
-
-  if (totalResolvedCalls === 0) return 0;
-
-  const winRate = winCount / totalResolvedCalls;
-  const confidence = getConfidenceMultiplier(totalResolvedCalls);
-  const raw = winRate * 100 * confidence;
-
-  return Math.min(100, Math.max(0, Math.round(raw)));
+  return Math.round(score * 100) / 100;
 }
