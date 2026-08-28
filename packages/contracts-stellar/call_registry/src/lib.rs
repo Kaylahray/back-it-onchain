@@ -153,11 +153,9 @@ fn maybe_bump(env: &Env, key: &DataKey) {
     if !storage.has(key) {
         return;
     }
-    // Remaining live ledgers for this entry. If already above threshold, skip.
-    let remaining = storage.get_ttl(key);
-    if remaining >= TTL_THRESHOLD {
-        return;
-    }
+    // Extend TTL for the key. `get_ttl` isn't available on all SDK
+    // versions, so simply extend when the key exists — it's safe to call
+    // repeatedly and avoids relying on non-portable APIs.
     storage.extend_ttl(key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
 }
 
