@@ -414,8 +414,10 @@ impl CallRegistry {
         env.storage().persistent().set(&DataKey::IsPaused, &false);
         maybe_bump(&env, &DataKey::IsPaused);
 
-        env.events()
-            .publish((Symbol::new(&env, "Paused"), false), env.ledger().sequence());
+        env.events().publish(
+            (Symbol::new(&env, "Paused"), false),
+            env.ledger().sequence(),
+        );
     }
 
     pub fn get_is_paused(env: Env) -> bool {
