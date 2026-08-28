@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import {
   PriceHistoryPeriod,
@@ -19,5 +19,15 @@ export class AnalyticsController {
   getPriceHistory(@Query() query: PriceHistoryQueryDto) {
     const period = query.period ?? PriceHistoryPeriod.SEVEN_DAYS;
     return this.analyticsService.getPriceHistory(query.tokenAddress, period);
+  }
+
+  /**
+   * GET /analytics/reputation/:wallet
+   *
+   * Returns a wallet's computed reputation score. Cached for 1 hour.
+   */
+  @Get('reputation/:wallet')
+  getReputation(@Param('wallet') wallet: string) {
+    return this.analyticsService.getReputation(wallet);
   }
 }

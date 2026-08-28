@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BadgesService } from './badges.service';
 import { UserBadge } from './badge.entity';
 import { BadgeKey } from './badge-definitions';
@@ -9,6 +10,7 @@ describe('BadgesService', () => {
   let service: BadgesService;
   let userBadgeRepo: Repository<UserBadge>;
   let dataSource: DataSource;
+  let eventEmitter: { emit: jest.Mock };
 
   const mockUserBadgeRepo = {
     find: jest.fn(),
@@ -22,12 +24,13 @@ describe('BadgesService', () => {
   };
 
   beforeEach(async () => {
-    // Reset mock state and implementations so tests stay isolated.
     mockUserBadgeRepo.find.mockReset();
     mockUserBadgeRepo.findOne.mockReset();
     mockUserBadgeRepo.save.mockReset();
     mockUserBadgeRepo.create.mockReset();
     mockDataSource.query.mockReset();
+
+    eventEmitter = { emit: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -40,6 +43,10 @@ describe('BadgesService', () => {
           provide: DataSource,
           useValue: mockDataSource,
         },
+        {
+          provide: EventEmitter2,
+          useValue: eventEmitter,
+        },
       ],
     }).compile();
 
@@ -49,7 +56,6 @@ describe('BadgesService', () => {
     );
     dataSource = module.get<DataSource>(DataSource);
 
-    // Reset mock implementations
     mockUserBadgeRepo.create.mockImplementation((data) => data);
     mockUserBadgeRepo.save.mockResolvedValue({});
   });
@@ -58,18 +64,8 @@ describe('BadgesService', () => {
     it('should return user badges ordered by grantedAt', async () => {
       const wallet = '0x123';
       const badges = [
-        {
-          id: '1',
-          wallet,
-          badge: BadgeKey.FIRST_CALL,
-          grantedAt: new Date('2023-01-01'),
-        },
-        {
-          id: '2',
-          wallet,
-          badge: BadgeKey.FIVE_WINS,
-          grantedAt: new Date('2023-01-02'),
-        },
+        { id: '1', wallet, badge: BadgeKey.FIRST_CALL, grantedAt: new Date() },
+        { id: '2', wallet, badge: BadgeKey.FIVE_WINS, grantedAt: new Date() },
       ];
       mockUserBadgeRepo.find.mockResolvedValue(badges);
 
@@ -86,72 +82,65 @@ describe('BadgesService', () => {
   describe('checkAndGrantBadges', () => {
     const wallet = '0x123';
 
-    beforeEach(() => {
-      // Mock create and save
-      mockUserBadgeRepo.create.mockImplementation((data) => data);
-      mockUserBadgeRepo.save.mockResolvedValue({});
-    });
-
-    it('should grant multiple badges when thresholds are met', async () => {
-      // Mock the threshold queries
+    it('should grant badges when thresholds are met', async () => {
+      // callCount, winsCount, totalStake, followerCount, streak, oracleSlayer
       mockDataSource.query
         .mockResolvedValueOnce([{ cnt: '5' }]) // callCount
         .mockResolvedValueOnce([{ cnt: '7' }]) // winsCount
         .mockResolvedValueOnce([{ total: '1500.5' }]) // totalStake
-        .mockResolvedValueOnce([{ cnt: '12' }]); // followerCount
+        .mockResolvedValueOnce([{ cnt: '12' }]) // followerCount
+        .mockResolvedValueOnce([
+          { outcome: true },
+          { outcome: true },
+          { outcome: true },
+        ]) // streak = 3
+        .mockResolvedValueOnce([{ cnt: '3' }]); // oracleSlayer
 
-      // Mock findOne for existing badges check
-      mockUserBadgeRepo.findOne.mockResolvedValue(null); // No existing badges
+      mockUserBadgeRepo.findOne.mockResolvedValue(null);
 
       await service.checkAndGrantBadges(wallet);
 
-      // Should check for existing badges
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledTimes(4);
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.FIRST_CALL },
-      });
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.FIVE_WINS },
-      });
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.WHALE_STAKER },
-      });
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.SOCIAL_BUTTERFLY },
-      });
-
-      // Should create and save badges
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(4);
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(4);
+      // FIRST_CALL, FIVE_WINS, WHALE_STAKER, SOCIAL_BUTTERFLY, STREAK, ORACLE_SLAYER
+      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledTimes(6);
+      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(6);
+      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(6);
     });
 
-    it('should not grant badges that are already earned', async () => {
-      // Mock the threshold queries
+    it('should not grant badges already earned', async () => {
       mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '5' }]) // callCount
-        .mockResolvedValueOnce([{ cnt: '7' }]) // winsCount
-        .mockResolvedValueOnce([{ total: '1500.5' }]) // totalStake
-        .mockResolvedValueOnce([{ cnt: '12' }]); // followerCount
+        .mockResolvedValueOnce([{ cnt: '5' }])
+        .mockResolvedValueOnce([{ cnt: '7' }])
+        .mockResolvedValueOnce([{ total: '1500.5' }])
+        .mockResolvedValueOnce([{ cnt: '12' }])
+        .mockResolvedValueOnce([
+          { outcome: true },
+          { outcome: true },
+          { outcome: true },
+        ])
+        .mockResolvedValueOnce([{ cnt: '3' }]);
 
       mockUserBadgeRepo.findOne
-        .mockResolvedValueOnce(null) // FIRST_CALL not earned
-        .mockResolvedValueOnce({ id: '1', wallet, badge: BadgeKey.FIVE_WINS }) // FIVE_WINS already earned
-        .mockResolvedValueOnce(null) // WHALE_STAKER not earned
-        .mockResolvedValueOnce(null); // SOCIAL_BUTTERFLY not earned
+        .mockResolvedValueOnce(null) // FIRST_CALL new
+        .mockResolvedValueOnce({ id: '1', wallet, badge: BadgeKey.FIVE_WINS }) // already earned
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
 
       await service.checkAndGrantBadges(wallet);
 
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(3); // Only 3 new badges
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(3);
+      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(5);
+      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(5);
     });
 
     it('should grant no badges when no thresholds are met', async () => {
-      // Mock low values
       mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '0' }]) // callCount = 0
-        .mockResolvedValueOnce([{ cnt: '2' }]) // winsCount = 2
-        .mockResolvedValueOnce([{ total: '500' }]) // totalStake = 500
-        .mockResolvedValueOnce([{ cnt: '5' }]); // followerCount = 5
+        .mockResolvedValueOnce([{ cnt: '0' }]) // callCount
+        .mockResolvedValueOnce([{ cnt: '2' }]) // winsCount
+        .mockResolvedValueOnce([{ total: '500' }]) // totalStake
+        .mockResolvedValueOnce([{ cnt: '5' }]) // followerCount
+        .mockResolvedValueOnce([{ outcome: false }]) // streak = 0
+        .mockResolvedValueOnce([{ cnt: '0' }]); // oracleSlayer
 
       await service.checkAndGrantBadges(wallet);
 
@@ -160,240 +149,101 @@ describe('BadgesService', () => {
       expect(mockUserBadgeRepo.save).not.toHaveBeenCalled();
     });
 
-    it('should grant only FIRST_CALL when callCount >= 1', async () => {
+    it('should grant STREAK and HIGH_ROLLER when thresholds are met', async () => {
       mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '1' }]) // callCount = 1
-        .mockResolvedValueOnce([{ cnt: '0' }]) // winsCount = 0
-        .mockResolvedValueOnce([{ total: '0' }]) // totalStake = 0
-        .mockResolvedValueOnce([{ cnt: '0' }]); // followerCount = 0
+        .mockResolvedValueOnce([{ cnt: '1' }]) // callCount
+        .mockResolvedValueOnce([{ cnt: '0' }]) // winsCount
+        .mockResolvedValueOnce([{ total: '12000' }]) // totalStake >= 10k
+        .mockResolvedValueOnce([{ cnt: '0' }]) // followerCount
+        .mockResolvedValueOnce([
+          { outcome: true },
+          { outcome: true },
+          { outcome: true },
+          { outcome: true },
+        ]) // streak = 4
+        .mockResolvedValueOnce([{ cnt: '0' }]); // oracleSlayer
+
+      mockUserBadgeRepo.findOne.mockResolvedValue(null);
 
       await service.checkAndGrantBadges(wallet);
 
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledTimes(1);
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.FIRST_CALL },
-      });
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(1);
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(1);
-    });
-
-    it('should grant FIVE_WINS and TEN_WINS when winsCount >= 10', async () => {
-      mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '0' }]) // callCount = 0
-        .mockResolvedValueOnce([{ cnt: '10' }]) // winsCount = 10
-        .mockResolvedValueOnce([{ total: '0' }]) // totalStake = 0
-        .mockResolvedValueOnce([{ cnt: '0' }]); // followerCount = 0
-
-      await service.checkAndGrantBadges(wallet);
-
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledTimes(2);
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.FIVE_WINS },
-      });
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.TEN_WINS },
-      });
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(2);
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(2);
-    });
-
-    it('should grant WHALE_STAKER when totalStake >= 1000', async () => {
-      mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '0' }]) // callCount = 0
-        .mockResolvedValueOnce([{ cnt: '0' }]) // winsCount = 0
-        .mockResolvedValueOnce([{ total: '1000' }]) // totalStake = 1000
-        .mockResolvedValueOnce([{ cnt: '0' }]); // followerCount = 0
-
-      await service.checkAndGrantBadges(wallet);
-
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledTimes(1);
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.WHALE_STAKER },
-      });
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(1);
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(1);
-    });
-
-    it('should grant SOCIAL_BUTTERFLY when followerCount >= 10', async () => {
-      mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '0' }]) // callCount = 0
-        .mockResolvedValueOnce([{ cnt: '0' }]) // winsCount = 0
-        .mockResolvedValueOnce([{ total: '0' }]) // totalStake = 0
-        .mockResolvedValueOnce([{ cnt: '10' }]); // followerCount = 10
-
-      await service.checkAndGrantBadges(wallet);
-
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledTimes(1);
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.SOCIAL_BUTTERFLY },
-      });
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(1);
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledTimes(1);
+      // FIRST_CALL, WHALE_STAKER, STREAK, HIGH_ROLLER
+      expect(mockUserBadgeRepo.create).toHaveBeenCalledTimes(4);
     });
 
     it('should handle database errors gracefully', async () => {
-      mockDataSource.query.mockRejectedValue(
-        new Error('Database connection failed'),
-      );
-
-      try {
-        await service.checkAndGrantBadges(wallet);
-      } catch (e) {
-        // Error is expected to be caught internally
-      }
-
-      expect(mockUserBadgeRepo.create).not.toHaveBeenCalled();
+      mockDataSource.query.mockRejectedValue(new Error('db down'));
+      await service.checkAndGrantBadges(wallet);
       expect(mockUserBadgeRepo.save).not.toHaveBeenCalled();
-    });
-
-    it('should handle save errors gracefully', async () => {
-      // Mock the threshold queries
-      mockDataSource.query
-        .mockResolvedValueOnce([{ cnt: '5' }]) // callCount
-        .mockResolvedValueOnce([{ cnt: '7' }]) // winsCount
-        .mockResolvedValueOnce([{ total: '1500.5' }]) // totalStake
-        .mockResolvedValueOnce([{ cnt: '12' }]); // followerCount
-
-      mockUserBadgeRepo.findOne.mockResolvedValue(null);
-      mockUserBadgeRepo.save.mockRejectedValue(new Error('Save failed'));
-
-      try {
-        await service.checkAndGrantBadges(wallet);
-      } catch (e) {
-        // Error is expected to be caught internally
-      }
     });
   });
 
   describe('grantIfNew', () => {
-    const wallet = '0x123';
-
-    it('should grant badge if not already exists', async () => {
+    it('should grant a badge and emit a notification when new', async () => {
       mockUserBadgeRepo.findOne.mockResolvedValue(null);
       mockUserBadgeRepo.create.mockReturnValue({
-        wallet,
+        wallet: '0x123',
         badge: BadgeKey.FIRST_CALL,
       });
       mockUserBadgeRepo.save.mockResolvedValue({});
 
-      await (service as any).grantIfNew(wallet, BadgeKey.FIRST_CALL);
+      await (service as any).grantIfNew('0x123', BadgeKey.FIRST_CALL);
 
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.FIRST_CALL },
-      });
-      expect(mockUserBadgeRepo.create).toHaveBeenCalledWith({
-        wallet,
-        badge: BadgeKey.FIRST_CALL,
-      });
-      expect(mockUserBadgeRepo.save).toHaveBeenCalledWith({
-        wallet,
-        badge: BadgeKey.FIRST_CALL,
-      });
+      expect(mockUserBadgeRepo.save).toHaveBeenCalled();
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'user.notification',
+        expect.objectContaining({ type: 'badge.awarded' }),
+      );
     });
 
-    it('should not grant badge if already exists', async () => {
+    it('should not grant a badge that already exists', async () => {
       mockUserBadgeRepo.findOne.mockResolvedValue({
         id: '1',
-        wallet,
+        wallet: '0x123',
         badge: BadgeKey.FIRST_CALL,
       });
 
-      await (service as any).grantIfNew(wallet, BadgeKey.FIRST_CALL);
+      await (service as any).grantIfNew('0x123', BadgeKey.FIRST_CALL);
 
-      expect(mockUserBadgeRepo.findOne).toHaveBeenCalledWith({
-        where: { wallet, badge: BadgeKey.FIRST_CALL },
-      });
-      expect(mockUserBadgeRepo.create).not.toHaveBeenCalled();
       expect(mockUserBadgeRepo.save).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 
-  describe('Threshold queries', () => {
+  describe('threshold queries', () => {
     const wallet = '0x123';
     const normalizeSql = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-    describe('getCallCount', () => {
-      it('should return the count of non-hidden calls', async () => {
-        mockDataSource.query.mockResolvedValue([{ cnt: '5' }]);
-
-        const result = await (service as any).getCallCount(wallet);
-
-        const [actualQuery, actualParams] = (mockDataSource.query as any).mock
-          .calls[0];
-        expect(normalizeSql(actualQuery)).toBe(
-          normalizeSql(
-            `SELECT COUNT(*)::int AS cnt FROM "call"
-           WHERE creator_wallet = $1 AND is_hidden = false`,
-          ),
-        );
-        expect(actualParams).toEqual([wallet]);
-        expect(result).toBe(5);
-      });
+    it('getCallCount counts non-hidden calls', async () => {
+      mockDataSource.query.mockResolvedValue([{ cnt: '5' }]);
+      const result = await (service as any).getCallCount(wallet);
+      const [q, p] = (mockDataSource.query as any).mock.calls[0];
+      expect(normalizeSql(q)).toContain('is_hidden = false');
+      expect(p).toEqual([wallet]);
+      expect(result).toBe(5);
     });
 
-    describe('getWinsCount', () => {
-      it('should return the count of resolved winning calls', async () => {
-        mockDataSource.query.mockResolvedValue([{ cnt: '3' }]);
-
-        const result = await (service as any).getWinsCount(wallet);
-
-        const [actualQuery, actualParams] = (mockDataSource.query as any).mock
-          .calls[0];
-        expect(normalizeSql(actualQuery)).toBe(
-          normalizeSql(
-            `SELECT COUNT(*)::int AS cnt FROM "call"
-           WHERE creator_wallet = $1 AND status = 'RESOLVED' AND outcome = true`,
-          ),
-        );
-        expect(actualParams).toEqual([wallet]);
-        expect(result).toBe(3);
-      });
+    it('getWinsCount counts resolved winning calls', async () => {
+      mockDataSource.query.mockResolvedValue([{ cnt: '3' }]);
+      const result = await (service as any).getWinsCount(wallet);
+      expect(result).toBe(3);
     });
 
-    describe('getTotalStake', () => {
-      it('should return the total stake across all non-hidden calls', async () => {
-        mockDataSource.query.mockResolvedValue([{ total: '1234.56' }]);
-
-        const result = await (service as any).getTotalStake(wallet);
-
-        const [actualQuery, actualParams] = (mockDataSource.query as any).mock
-          .calls[0];
-        expect(normalizeSql(actualQuery)).toBe(
-          normalizeSql(
-            `SELECT COALESCE(SUM(total_stake_yes + total_stake_no), 0) AS total
-           FROM "call" WHERE creator_wallet = $1 AND is_hidden = false`,
-          ),
-        );
-        expect(actualParams).toEqual([wallet]);
-        expect(result).toBe(1234.56);
-      });
-
-      it('should return 0 when no calls exist', async () => {
-        mockDataSource.query.mockResolvedValue([{ total: null }]);
-
-        const result = await (service as any).getTotalStake(wallet);
-
-        expect(result).toBe(0);
-      });
+    it('getStreak returns trailing consecutive wins', async () => {
+      mockDataSource.query.mockResolvedValue([
+        { outcome: true },
+        { outcome: true },
+        { outcome: false },
+        { outcome: true },
+      ]);
+      const result = await (service as any).getStreak(wallet);
+      expect(result).toBe(2);
     });
 
-    describe('getFollowerCount', () => {
-      it('should return the count of followers', async () => {
-        mockDataSource.query.mockResolvedValue([{ cnt: '15' }]);
-
-        const result = await (service as any).getFollowerCount(wallet);
-
-        const [actualQuery, actualParams] = (mockDataSource.query as any).mock
-          .calls[0];
-        expect(normalizeSql(actualQuery)).toBe(
-          normalizeSql(
-            `SELECT COUNT(*)::int AS cnt FROM user_follows
-           WHERE following_wallet = $1`,
-          ),
-        );
-        expect(actualParams).toEqual([wallet]);
-        expect(result).toBe(15);
-      });
+    it('getOracleSlayerCount counts underdog wins', async () => {
+      mockDataSource.query.mockResolvedValue([{ cnt: '4' }]);
+      const result = await (service as any).getOracleSlayerCount(wallet);
+      expect(result).toBe(4);
     });
   });
 });

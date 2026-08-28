@@ -5,6 +5,7 @@ import { PlatformSettings } from '../indexer/platform-settings.entity';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { CallsModule } from '../calls/calls.module';
+import { PaymasterPolicyService } from '../oracle/paymaster-policy.service';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { CallsModule } from '../calls/calls.module';
     forwardRef(() => CallsModule),
   ],
   controllers: [AdminController],
-  providers: [AdminService],
-  exports: [AdminService],
+  providers: [AdminService, PaymasterPolicyService],
+  exports: [AdminService, PaymasterPolicyService],
 })
 export class AdminModule {}

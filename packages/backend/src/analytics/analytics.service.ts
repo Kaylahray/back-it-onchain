@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
+import { DataSource } from 'typeorm';
 import { PriceHistoryPeriod } from './dto/price-history-query.dto';
+import {
+  computeReputationScore,
+  ReputationCallInput,
+} from './reputation.util';
 
 // [timestamp_ms, close_price]
 export type PriceCandle = [number, number];
@@ -57,7 +62,10 @@ const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
 
-  constructor(@Inject(CACHE_MANAGER) private readonly cache: Cache) {}
+  constructor(
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    private readonly dataSource: DataSource,
+  ) {}
 
   async getPriceHistory(
     tokenAddress: string,
@@ -86,6 +94,71 @@ export class AnalyticsService {
     const result: PriceHistoryResult = { tokenAddress, period, candles };
 
     await this.cache.set(cacheKey, result, CACHE_TTL_MS);
+
+    return result;
+  }
+
+  /**
+   * Computes and returns a wallet's reputation score.
+   *
+   * score = Σ (outcomeCorrect ? +1 : -1) * stakeWeight * timeDecay(halfLife 30d)
+   *
+   * Draws/UNRESOLVED calls are skipped. The result is cached for 1 hour and
+   * persisted back onto the user profile.
+   */
+  async getReputation(wallet: string): Promise<{
+    wallet: string;
+    reputationScore: number;
+    resolvedCalls: number;
+  }> {
+    const cacheKey = `reputation:${wallet.toLowerCase()}`;
+    const cached = await this.cache.get<{
+      wallet: string;
+      reputationScore: number;
+      resolvedCalls: number;
+    }>(cacheKey);
+    if (cached) return cached;
+
+    const [userRow] = await this.dataSource.query<Array<{ wallet: string }>>(
+      `SELECT wallet FROM "user" WHERE wallet = $1`,
+      [wallet],
+    );
+    if (!userRow) {
+      throw new NotFoundException(`User ${wallet} not found`);
+    }
+
+    const rows = await this.dataSource.query<Array<{
+      outcome: boolean | null;
+      totalStake: string;
+      resolvedAt: Date;
+    }>>(
+      `SELECT outcome, (total_stake_yes + total_stake_no) AS "totalStake",
+              COALESCE(end_ts, updated_at) AS "resolvedAt"
+       FROM "call"
+       WHERE creator_wallet = $1
+         AND status = 'RESOLVED'
+         AND is_hidden = false`,
+      [wallet],
+    );
+
+    const inputs: ReputationCallInput[] = rows.map((r) => ({
+      outcome: r.outcome as boolean | null,
+      stakeAmount: parseFloat(r.totalStake) || 0,
+      resolvedAt: r.resolvedAt,
+    }));
+
+    const reputationScore = computeReputationScore(inputs);
+    const result = {
+      wallet,
+      reputationScore,
+      resolvedCalls: inputs.length,
+    };
+
+    await this.dataSource.query(
+      `UPDATE "user" SET reputation_score = $1 WHERE wallet = $2`,
+      [reputationScore, wallet],
+    );
+    await this.cache.set(cacheKey, result, 3_600_000); // 1 hour
 
     return result;
   }

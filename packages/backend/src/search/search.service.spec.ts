@@ -75,7 +75,13 @@ describe('SearchService', () => {
     it('returns a meta object with query and total', async () => {
       const result = await service.search('bitcoin');
 
-      expect(result.meta).toEqual({ query: 'bitcoin', total: 3 });
+      expect(result.meta).toEqual({
+        query: 'bitcoin',
+        page: 1,
+        limit: 10,
+        total: 3,
+        totalPages: 1,
+      });
     });
 
     it('total equals sum of all category lengths', async () => {

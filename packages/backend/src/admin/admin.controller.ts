@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -12,9 +13,15 @@ import {
 import { AdminGuard } from '../common/guards/admin.guard';
 import { AdminService } from './admin.service';
 import { CallsService } from '../calls/calls.service';
+import { PaymasterPolicyService } from '../oracle/paymaster-policy.service';
+import { PaymasterBudgetSnapshot } from '../oracle/paymaster-policy.service';
 
 class CircuitBreakerDto {
   paused!: boolean;
+}
+
+class ResetBudgetDto {
+  address?: string;
 }
 
 @Controller('admin')
@@ -23,6 +30,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly callsService: CallsService,
+    private readonly paymasterPolicyService: PaymasterPolicyService,
   ) {}
 
   /**
@@ -49,5 +57,31 @@ export class AdminController {
   ) {
     const adminWallet: string = req.headers['x-admin-wallet'] ?? 'admin';
     return this.callsService.resolveDispute(id, adminWallet, Boolean(upheld));
+   * GET /admin/paymaster/budget
+   *
+   * Returns the paymaster budget snapshot: per-address caps, global daily
+   * allowance, and current per-address spend/disabled state.
+   */
+  @Get('paymaster/budget')
+  async getPaymasterBudget(): Promise<PaymasterBudgetSnapshot> {
+    return this.paymasterPolicyService.getBudgetSnapshot();
+  }
+
+  /**
+   * POST /admin/paymaster/budget/reset
+   *
+   * Reset the paymaster spend counters. Pass an `address` in the body to reset
+   * a single address; omit it to reset the entire paymaster budget (re-enabling
+   * all auto-disabled addresses).
+   *
+   * Body: { "address"?: string }
+   */
+  @Post('paymaster/budget/reset')
+  @HttpCode(HttpStatus.OK)
+  async resetPaymasterBudget(
+    @Body() body: ResetBudgetDto,
+  ): Promise<{ resets: string }> {
+    await this.paymasterPolicyService.resetBudget(body.address);
+    return { resets: body.address ?? 'all' };
   }
 }

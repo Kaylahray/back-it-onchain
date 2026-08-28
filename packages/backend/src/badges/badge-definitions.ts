@@ -4,6 +4,9 @@ export enum BadgeKey {
   TEN_WINS = 'TEN_WINS',
   WHALE_STAKER = 'WHALE_STAKER',
   SOCIAL_BUTTERFLY = 'SOCIAL_BUTTERFLY',
+  STREAK = 'STREAK',
+  HIGH_ROLLER = 'HIGH_ROLLER',
+  ORACLE_SLAYER = 'ORACLE_SLAYER',
 }
 
 export interface BadgeDefinition {
@@ -37,5 +40,20 @@ export const BADGE_DEFINITIONS: BadgeDefinition[] = [
     key: BadgeKey.SOCIAL_BUTTERFLY,
     name: 'Social Butterfly',
     description: 'Gained 10 followers',
+  },
+  {
+    key: BadgeKey.STREAK,
+    name: 'On A Roll',
+    description: 'Won 3 prediction calls in a row',
+  },
+  {
+    key: BadgeKey.HIGH_ROLLER,
+    name: 'High Roller',
+    description: 'Markets attracted over 10,000 tokens in total stake',
+  },
+  {
+    key: BadgeKey.ORACLE_SLAYER,
+    name: 'Oracle Slayer',
+    description: 'Beat the oracle on 3 underdog outcomes',
   },
 ];

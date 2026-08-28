@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { withRetry } from '../common/rpc/rpc-retry.util';
 
 /**
  * IpfsService
@@ -12,11 +13,13 @@ import * as crypto from 'crypto';
  * Handles pinning arbitrary buffers (images, JSON) to IPFS.
  *
  * Strategy (in priority order):
- *   1. Kubo HTTP API  (IPFS_API_URL, default http://localhost:5001)
- *   2. Pinata REST API (PINATA_JWT)
- *   3. Local mock       (dev-only fallback — stores nothing, returns a
- *                        deterministic pseudo-CID so the rest of the
- *                        system keeps working without a running IPFS node)
+ *   1. Pinata REST API (PINATA_JWT) — primary provider
+ *   2. Kubo HTTP API    (IPFS_API_URL, default http://localhost:5001)
+ *   3. Local fallback   (dev-only — stores nothing, returns a deterministic
+ *                        pseudo-CID so the rest of the system keeps working
+ *                        without a running IPFS node)
+ *
+ * All provider calls are wrapped in `withRetry` for resilience.
  */
 @Injectable()
 export class IpfsService {
@@ -40,22 +43,28 @@ export class IpfsService {
    * @param filename  Logical filename passed to the IPFS API (affects MIME detection)
    */
   async pin(buffer: Buffer, filename = 'file'): Promise<string> {
-    // 1. Try Kubo
-    try {
-      return await this.pinViaKubo(buffer, filename);
-    } catch (err) {
-      this.logger.warn(
-        `Kubo upload failed, trying Pinata: ${(err as Error).message}`,
-      );
-    }
-
-    // 2. Try Pinata
+    // 1. Try Pinata (primary)
     if (this.pinataJwt) {
       try {
-        return await this.pinViaPinata(buffer, filename);
+        return await withRetry(() => this.pinViaPinata(buffer, filename), {
+          maxAttempts: 3,
+          operationName: 'ipfs.pinata',
+        });
       } catch (err) {
         this.logger.warn(`Pinata upload failed: ${(err as Error).message}`);
       }
+    }
+
+    // 2. Try Kubo
+    try {
+      return await withRetry(() => this.pinViaKubo(buffer, filename), {
+        maxAttempts: 3,
+        operationName: 'ipfs.kubo',
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Kubo upload failed, trying local fallback: ${(err as Error).message}`,
+      );
     }
 
     // 3. Dev fallback — deterministic pseudo-CID (never in production)

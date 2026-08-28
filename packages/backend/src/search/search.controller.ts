@@ -8,6 +8,11 @@ export class SearchController {
 
   @Get()
   async search(@Query() query: SearchQueryDto): Promise<SearchResponseDto> {
-    return this.searchService.search(query.q);
+    return this.searchService.search(query.q, {
+      chain: query.chain,
+      status: query.status,
+      page: query.page,
+      limit: query.limit,
+    });
   }
 }
